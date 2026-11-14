@@ -1,17 +1,17 @@
 """Build the submission file: data in, frame,label CSV out.
 
-v1 rule-based pipeline (every number is in config.py, every rule in core.py):
+Rule-based pipeline, v2 parameters (every number is in config.py, every rule in core.py):
   1. tactical ATD via kloppy, scaled to metres with the games.py pitch
   2. ball gaps of <= 25 frames linearly interpolated
-  3. per-frame control: nearest player <= 1.5 m from the ball, no opponent <= 1.0 m
-  4. confirmed control = same team >= 8 consecutive frames; possession switches only on the
+  3. per-frame control: nearest player <= 2.0 m from the ball, no opponent <= 1.0 m
+  4. confirmed control = same team >= 12 consecutive frames; possession switches only on the
      other team's confirmed control, otherwise the last state holds
   5. ball > 0.5 m outside the pitch for >= 5 frames -> D, until the next Smart Tagging
      set-piece restart (possession to the tagged team) or, if sooner, the ball back inside
      with a team's confirmed control (possession to that team). A possible goal (exit over a
      goal line between the posts, +0.5 m) ends only at the next kickoff, goal-kick or
      corner tag
-  6. H/A runs < 25 frames and D runs < 50 frames merged into their neighbour
+  6. H/A runs < 50 frames and D runs < 50 frames merged into their neighbour
   7. X outside the graded halves
 """
 

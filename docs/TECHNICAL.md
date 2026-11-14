@@ -41,15 +41,17 @@ We chose a rule-based system over a learned model on purpose:
 | Broadcast recording | No | Not synchronised to the tactical timeline, and its homography covers only 65.8% of frames. |
 | ATD `ball_state` / `ball_owning_team_id` | Checked, dropped | Empty on every frame of this file. |
 
-No external data, no pre-trained models, no manual labels.
+| SkillCorner open data | **Yes, for validation only** | 20 A-League 2024/25 matches (MIT licence) with provider possession labels. Used to choose three parameter values and to measure the method on matches it was not built on (section 5). Never mixed into the competition run. |
+
+No pre-trained models, no manual labels.
 
 ## 3. Pipeline and possession rules
 
 ```mermaid
 flowchart LR
     A[Tracking<br/>ball + 46 track slots] --> B[1. Fill ball gaps<br/>up to 1 s]
-    B --> C[2. Per-frame control<br/>≤1.5 m, no opponent ≤1 m]
-    C --> D[3. Confirmed control<br/>≥8 frames]
+    B --> C[2. Per-frame control<br/>≤2 m, no opponent ≤1 m]
+    C --> D[3. Confirmed control<br/>≥12 frames]
     E[Smart Tagging<br/>set-piece restarts] --> F
     B --> G[4. Ball out of play<br/>&gt;0.5 m out, ≥5 frames]
     D --> F[5. State machine]
@@ -64,17 +66,17 @@ by linear interpolation between the observed frames on each side. Longer gaps st
 state machine holds its state through them rather than guessing.
 
 ### 3.2 Control on one frame
-A team **controls** the ball on a frame when its nearest player is within **1.5 m** of the ball
+A team **controls** the ball on a frame when its nearest player is within **2.0 m** of the ball
 and **no opponent is within 1.0 m**. Two opponents close to the ball make it a duel, and a duel
 means nobody controls it.
 
 ### 3.3 Confirmed control
-Control by the same team for **at least 8 consecutive frames (0.32 s)** counts as confirmed. The
+Control by the same team for **at least 12 consecutive frames (0.48 s)** counts as confirmed. The
 gain is dated to the **first** frame of that run, so a possession starts where control began,
 not where it was confirmed.
 
 This is our line between "touched" and "controlled". A deflection, a block or a pass flying past
-a defender gives a few frames of proximity at most, not 8 frames of uncontested control.
+a defender gives a few frames of proximity at most, not half a second of uncontested control.
 
 ### 3.4 Dead ball
 - **Out of play:** the ball is more than **0.5 m** outside a touchline or goal line for at least
@@ -109,9 +111,8 @@ stateDiagram-v2
 ```
 
 ### 3.6 Short runs and ungraded time
-- Possession runs shorter than **1 s (25 frames)** and dead-ball runs shorter than **2 s
-  (50 frames)** are merged into the run before them. A one-frame flicker should not count as a
-  possession.
+- Possession runs and dead-ball runs shorter than **2 s (50 frames)** are merged into the run
+  before them. A flicker should not count as a possession.
 - Frames outside the two graded halves (before kickoff, half-time, after the final whistle) are
   `X`.
 
@@ -121,7 +122,7 @@ stateDiagram-v2
 |---|---|
 | Loose ball, nobody close | Previous team keeps possession |
 | 50/50 challenge | Duel: nobody controls it, previous team keeps possession |
-| Deflection or block | Not 8 frames of uncontested control, so no change |
+| Deflection or block | Not 12 frames of uncontested control, so no change |
 | Pass in flight | Previous team keeps possession until a player controls it |
 | Throw-in, corner, goal kick, free kick | Dead from ball-out until the restart tag |
 | Goal | Dead until the kickoff |
@@ -129,43 +130,77 @@ stateDiagram-v2
 
 ## 4. Parameters and where they come from
 
-Nothing was trained or tuned. Every value is in `src/possession/config.py`, with its source.
+Nothing was trained, and nothing was tuned on the competition match. Three values were chosen on
+**external** data (SkillCorner, section 5); the rest come from the literature, the Laws of the
+Game, or design choices fixed before any scoring. Every value is in `src/possession/config.py`,
+with its source.
 
 | Parameter | Value | Source |
 |---|---|---|
 | Ball gap to interpolate | 25 frames (1 s) | databallpy's tracking-quality check flags ball gaps of ≥ 1 s |
-| Control radius | 1.5 m | databallpy default `pz_radius`, an implementation of Vidal-Codina et al. (2022); the paper used 0.5–1 m and suggests a larger radius for lower-quality tracking such as ours |
+| Control radius | 2.0 m | **External data.** v1 used databallpy's 1.5 m default (Vidal-Codina et al., 2022, who suggest a larger radius for lower-quality tracking); 2.0 m was best on SkillCorner |
 | Duel radius | 1.0 m | Vidal-Codina et al. (2022), duel zone `R_dz = 1 m` for all providers |
-| Minimum possession run | 25 frames (1 s) | Link & Hoernig (2017): "very short sections (< 1 s) are excluded" |
+| Minimum possession run | 50 frames (2 s) | **External data.** v1 used 1 s from Link & Hoernig (2017); 2 s was better in 11 of 12 settings on SkillCorner |
 | Goal half-width | 3.66 m | IFAB Laws of the Game, Law 1 (7.32 m between the posts) |
-| Confirmed control | 8 frames | Design choice (no literature value) |
+| Confirmed control | 12 frames | **External data.** v1 used 8 (design choice); 8, 12 and 16 were within 0.008 at 2 m, so we took the middle |
 | Out-of-pitch margin and run | 0.5 m, 5 frames | Design choice, to reject tracking noise near the lines |
 | Goal-mouth margin | 0.5 m | Design choice, same as the out margin |
 | Minimum dead-ball run | 50 frames (2 s) | Design choice |
 | Restart anchor | start of the tag window | Design choice |
 
-All design choices were fixed **before** we scored them, from how the game works. None was chosen
-by comparing scores.
+The remaining design choices were fixed **before** any scoring, from how the game works. None was
+chosen by comparing scores on the competition match.
 
 ## 5. Results
 
-On the public 5-minute window (official scorer, unmodified):
+### External validation (SkillCorner open data, 20 matches)
+Our rules were built for one match whose labels we may not fit to, so we measured them on
+matches they had never seen: SkillCorner's 20 open A-League 2024/25 matches (MIT licence), which
+come with provider possession labels ("phases of play": team in possession while the ball is in
+play, dead ball otherwise). `external/` adapts each match to exactly the inputs our pipeline
+takes and scores it with the **organisers' own metric code**:
+
+- 10 fps broadcast tracking, resampled to 25 fps; ball kept only where SkillCorner detected it.
+- Smart Tagging stand-in: SkillCorner's automatic set-piece events (throw-in, free kick, goal
+  kick, corner receptions), the kickoff after a goal, and the start of each period.
+
+**Protocol.** Matches were split into 10 development and 10 held-out matches (alternating by id).
+A 24-setting grid over three parameters (confirmed frames 4/8/12/16 × control radius 1.0/1.5/2.0 m
+× minimum possession 1/2 s) was run on the development matches only. The chosen setting was then
+scored **once** on the held-out matches.
+
+| SkillCorner, mean spellF1 | Development (10) | **Held-out (10)** | All 20 |
+|---|---|---|---|
+| Organisers' baseline (`smooth50`) | — | — | 0.350 |
+| v1 (8 frames, 1.5 m, 1 s) | 0.442 | 0.437 | 0.439 |
+| **v2 (12 frames, 2.0 m, 2 s), submitted** | 0.475 | **0.470** | 0.473 |
+
+On the held-out matches v2 beats v1 on **9 of 10**, by +0.033 on average (paired bootstrap 95%
+interval [+0.020, +0.046]). Both versions beat the organisers' baseline by a wide margin on data
+neither was built on. The best region of the grid was flat (8–16 frames at 2 m within 0.008),
+so we took its middle rather than its single best point.
+
+Caveat: SkillCorner is broadcast tracking from a different league and provider, with its own
+possession definition, so absolute numbers do not transfer to the competition match. What
+transfers is the direction: these settings generalise across 20 matches rather than fitting one.
+
+Reproduce: `make external` (downloads the pinned SkillCorner revision to `external_data/`).
+
+### Competition match, public 5-minute window (correctness check only)
 
 | | spellF1 | macroF1 | possessions | mean duration | fragmentation |
 |---|---|---|---|---|---|
-| **DX Lab Team 3 (v1)** | **0.388** | 0.601 | 16 | 18.2 s | 0.81 |
+| **DX Lab Team 3 (v2, submitted)** | TODO | TODO | TODO | TODO | TODO |
+| DX Lab Team 3 (v1) | 0.388 | 0.601 | 16 | 18.2 s | 0.81 |
 | `baseline_smooth125` | 0.424 | 0.581 | 16 | 18.5 s | 0.81 |
 | `baseline_smooth50` (published floor) | 0.326 | 0.621 | 26 | 10.8 s | 1.43 |
 | `baseline_raw` | 0.038 | 0.597 | 131 | 2.0 s | 6.52 |
 | Ground truth | — | — | 17 | 14.2 s | — |
 
-Over the full match the pipeline predicts 310 possessions (mean 18.1 s). Of the 158,857 graded frames: 47.3% H,
-41.0% A, 11.7% D.
-
-`baseline_smooth125` scores higher on this window, but the gap is inside the noise band of a
-17-possession sample, and the organisers show `smooth125` is worse than `smooth50` over the full
-match. We did not tune anything to close that gap: doing it on the public window would be fitting
-to the ground truth.
+v2 was chosen on external data **before** it was run on the competition match, and it is
+submitted whatever its public score: 17 possessions cannot tell versions apart reliably (the
+organisers' own baselines reorder between this window and the full match), and choosing by it
+would be fitting to the ground truth.
 
 ### How the public window was used
 Only to check correctness. The first version predicted **2 possessions** on the public window.
@@ -185,11 +220,13 @@ is a bug fix, not a parameter change, and no parameter value changed as a result
   team shape and movement, or estimate the ball's position with a Kalman smoother.
 - **No ball height.** Shots over the bar and goals look the same. We resolve it through the
   restart that follows; the event tags could resolve it directly.
-- **Short possessions after restarts** can be merged into the dead ball by the 1 s rule.
+- **Short possessions** under 2 s are merged into the run before them, so a very brief possession
+  (for example straight after a restart) is lost.
 - **Smart Tagging dependence.** A missing or mistimed set-piece tag delays the end of a dead
   ball, unless the "back inside + confirmed control" exit catches it.
-- **The design choices are untested on other data.** Next step: check them on external data with
-  possession labels, which the rules allow.
+- **External validation is one provider.** SkillCorner differs from Metrica tracking in camera,
+  frame rate and labelling. Next step: add the DFL Bundesliga dataset (Bassek et al., 2025), which
+  has ball-status and possession labels, and validate the dead-ball rules there too.
 
 ## 7. Reproduction
 
@@ -198,6 +235,7 @@ uv sync --frozen                    # Python 3.11, exact versions from uv.lock
 # put the data bundle in ./data (see data/README.md) or set MTAH_DATA_DIR
 make submission TEAM=DX_Lab_Team_3  # writes submissions/DX_Lab_Team_3.csv, validates, scores
 make reproduce  TEAM=DX_Lab_Team_3  # builds twice and checks the files are byte-identical
+make external                       # external validation on SkillCorner open data
 make test                           # unit tests on synthetic data only
 ```
 
@@ -207,7 +245,8 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
 ## 8. Compliance
 
 - Labels come from the algorithm only. There is no hand annotation and no manual data.
-- Nothing was trained, fitted or calibrated on the ground truth or the video. The public ground
+- Nothing was trained, fitted or calibrated on the ground truth or the video. Three parameters
+  were chosen on external data (SkillCorner, MIT licence), as the rules allow. The public ground
   truth was used for correctness checks only (section 5).
 - We did not check our output against the video.
 - AI coding assistants were used to help write code and documentation. After the organisers'
@@ -222,6 +261,7 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
   football using tracking data. *Sports Engineering*, 25, 18.
 - Link, D., & Hoernig, M. (2017). Individual ball possession in soccer. *PLoS ONE*, 12(7),
   e0179953.
+- SkillCorner open data, https://github.com/SkillCorner/opendata (revision 4340d27), MIT licence.
 - databallpy (Alek050/databallpy), `add_individual_player_possession` and tracking-quality checks.
 - IFAB, *Laws of the Game*, Law 1: The Field of Play.
 - kloppy (PySport), Metrica EPTS reader.

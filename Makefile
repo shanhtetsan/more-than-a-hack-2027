@@ -6,7 +6,7 @@ PY      := uv run --frozen python
 SUB     := submissions/$(TEAM).csv
 
 .PHONY: help setup verify-scorer check-data baselines submission validate score score-all \
-        reproduce test lint format clean
+        reproduce external test lint format clean
 
 help:            ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -43,6 +43,10 @@ reproduce: check-data  ## rebuild twice and check the file is byte-identical
 	$(PY) -m possession.pipeline --team $(TEAM) --out .repro/b >/dev/null
 	cmp .repro/a/$(TEAM).csv .repro/b/$(TEAM).csv && echo "reproducible: identical"
 	rm -rf .repro
+
+external:        ## score the pipeline on 20 SkillCorner open-data matches (external validation)
+	$(PY) -m external.evaluate
+	$(PY) -m external.evaluate --baseline 50
 
 test:            ## smoke tests (no match data needed)
 	uv run --frozen pytest -q

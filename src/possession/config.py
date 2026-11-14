@@ -18,6 +18,13 @@ Sources, as checked against the papers/code (not paraphrased from memory):
 
 Where none of the three gives the number, the comment says so. Those are v1 choices to be
 revisited, not literature values.
+
+v2 (external validation): three values were then set on EXTERNAL data only -- SkillCorner open
+data, 20 A-League 2024/25 matches, MIT licence (external/). A 24-setting grid was run on 10
+development matches; the chosen setting was then checked once on the other 10 held-out matches:
+spellF1 0.437 (v1) -> 0.470 (v2), better on 9 of 10, paired bootstrap 95% CI of the gain
+[+0.020, +0.046]. The competition data, its ground truth and its video played no part.
+Reproduce: `make external` (v2) and docs/TECHNICAL.md section 5.
 """
 
 import os
@@ -50,9 +57,11 @@ MAX_BALL_GAP_FRAMES = 25
 # --- (3) Per-frame control ------------------------------------------------------------------
 
 # A team controls the ball on a frame when its nearest player is within this radius of it.
-# databallpy default pz_radius = 1.5 m (Vidal-Codina et al. 2022 possession zone, enlarged from
-# the paper's 0.5-1 m, as the paper itself suggests for lower-quality tracking).
-CONTROL_RADIUS_M = 1.5
+# v1 used databallpy's default pz_radius = 1.5 m (Vidal-Codina et al. 2022 possession zone,
+# enlarged from the paper's 0.5-1 m, as the paper suggests for lower-quality tracking).
+# v2: 2.0 m, chosen on external data (see module docstring); the five best of the 24 settings on
+# the development matches all used 2.0 m, consistent with the paper's advice for noisy tracking.
+CONTROL_RADIUS_M = 2.0
 
 # ...and no opponent is within this radius of the ball. Vidal-Codina et al. 2022 duel zone,
 # R_dz = 1 m for all providers; a duel overrides possession, so the frame has no controller.
@@ -63,9 +72,10 @@ DUEL_RADIUS_M = 1.0
 # Control by the same team must hold for this many consecutive frames (0.32 s) to count, and
 # possession then switches from the first frame of that run (Vidal-Codina et al. 2022 also put
 # the gain at the start of the control interval, f0).
-# No literature source for the 8: databallpy's min_frames_pz defaults to 0, and Link & Hoernig's
-# only duration rule is the 1 s exclusion below. v1 choice from the brief.
-MIN_CONFIRMED_FRAMES = 8
+# No literature source: databallpy's min_frames_pz defaults to 0. v1 used 8 (a design choice).
+# v2: 12 (0.48 s), chosen on external data; 8, 12 and 16 were within 0.008 of each other at
+# 2.0 m, so the middle of that flat region was taken rather than the single best point.
+MIN_CONFIRMED_FRAMES = 12
 
 # --- (5) Dead ball and restarts -------------------------------------------------------------
 
@@ -120,9 +130,11 @@ TEAM_TAG_TO_SIDE = {"barcelona": "H", "atletic club": "A"}
 
 # --- (6) Short-run merging ------------------------------------------------------------------
 
-# H/A runs shorter than this are absorbed into the run before them. Link & Hoernig 2017:
-# "Very short sections (< 1 s) are excluded from further processing" -> 25 frames at 25 Hz.
-MIN_TEAM_RUN_FRAMES = 25
+# H/A runs shorter than this are absorbed into the run before them. v1: 25 frames, from Link &
+# Hoernig 2017 ("Very short sections (< 1 s) are excluded from further processing").
+# v2: 50 frames (2 s), chosen on external data; 50 beat 25 in 11 of the 12 radius x confirm
+# settings on the development matches.
+MIN_TEAM_RUN_FRAMES = 50
 
 # D runs shorter than this (2 s) are absorbed the same way.
 # No literature source; v1 choice from the brief.

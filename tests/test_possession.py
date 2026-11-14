@@ -24,9 +24,9 @@ def test_config_values_match_the_brief():
     assert (config.OUT_MARGIN_M, config.MIN_OUT_FRAMES) == (0.5, 5)
     assert (config.GOAL_HALF_WIDTH_M, config.GOAL_MOUTH_MARGIN_M) == (3.66, 0.5)
     assert config.MAX_BALL_GAP_FRAMES == 25
-    assert (config.CONTROL_RADIUS_M, config.DUEL_RADIUS_M) == (1.5, 1.0)
-    assert config.MIN_CONFIRMED_FRAMES == 8
-    assert (config.MIN_TEAM_RUN_FRAMES, config.MIN_DEAD_RUN_FRAMES) == (25, 50)
+    assert (config.CONTROL_RADIUS_M, config.DUEL_RADIUS_M) == (2.0, 1.0)
+    assert config.MIN_CONFIRMED_FRAMES == 12
+    assert (config.MIN_TEAM_RUN_FRAMES, config.MIN_DEAD_RUN_FRAMES) == (50, 50)
     assert config.GRADED_BLOCKS == [(1, 11185, 90651), (2, 110808, 190197)]
     assert config.N_FRAMES == 199319
 
@@ -485,7 +485,10 @@ def goal_match(goal_y, tags=None):
     team = np.array([HOME, AWAY], dtype=np.int8)
     restarts = {30: HOME, **{f: t for f, (t, _) in tags.items()}}
     goal_restarts = {30: HOME, **{f: t for f, (t, ok) in tags.items() if ok}}
-    labels = core.label_match(ball, players, team, restarts, n, [(1, 20, 379)], config,
+    # synthetic scenes are short: keep the v1 1 s possession floor so a 40-frame run survives
+    cfg = types.SimpleNamespace(**{k: getattr(config, k) for k in dir(config) if k.isupper()})
+    cfg.MIN_TEAM_RUN_FRAMES = 25
+    labels = core.label_match(ball, players, team, restarts, n, [(1, 20, 379)], cfg,
                               goal_restarts=goal_restarts)
     return "".join(labels)
 
@@ -631,3 +634,15 @@ def test_kickoff_tag_opening_before_the_period_starts_play_on_its_first_frame():
     restarts = core.restart_events(events, "set pieces", "start", config.TEAM_TAG_TO_SIDE)
     _, stats = core.run_match(ball, players, team, restarts, n, blocks, config)
     assert stats["period_start_frames"] == [280]
+
+
+# --- external harness ------------------------------------------------------------------------
+
+def test_external_resample_10_to_25_fps_is_linear_and_spreads_nan():
+    from external import skillcorner
+    x = np.array([[0.0], [10.0], [20.0], [np.nan], [40.0]])
+    out = skillcorner.resample(x)[:, 0]
+    assert len(out) == 11                      # (5 - 1) * 25 // 10 + 1
+    assert np.allclose(out[:6], [0.0, 4.0, 8.0, 12.0, 16.0, 20.0])  # frame 5 = source 2 exactly
+    assert np.isnan(out[6:10]).all() and out[10] == 40.0
+    assert skillcorner.to_target(10) == 25

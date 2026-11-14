@@ -75,3 +75,6 @@ submissions/*
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# external datasets (downloaded by external/skillcorner.py)
+external_data/
