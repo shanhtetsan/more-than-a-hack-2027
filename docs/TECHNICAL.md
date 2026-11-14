@@ -190,7 +190,7 @@ Reproduce: `make external` (downloads the pinned SkillCorner revision to `extern
 
 | | spellF1 | macroF1 | possessions | mean duration | fragmentation |
 |---|---|---|---|---|---|
-| **DX Lab Team 3 (v2, submitted)** | TODO | TODO | TODO | TODO | TODO |
+| **DX Lab Team 3 (v2, submitted)** | **0.455** | 0.599 | 12 | 24.3 s | 0.62 |
 | DX Lab Team 3 (v1) | 0.388 | 0.601 | 16 | 18.2 s | 0.81 |
 | `baseline_smooth125` | 0.424 | 0.581 | 16 | 18.5 s | 0.81 |
 | `baseline_smooth50` (published floor) | 0.326 | 0.621 | 26 | 10.8 s | 1.43 |
@@ -201,6 +201,13 @@ v2 was chosen on external data **before** it was run on the competition match, a
 submitted whatever its public score: 17 possessions cannot tell versions apart reliably (the
 organisers' own baselines reorder between this window and the full match), and choosing by it
 would be fitting to the ground truth.
+
+For what it is worth, v2 also scores higher here than v1 (0.455 against 0.388). It predicts
+slightly too few possessions on this window (12 against 17, fragmentation 0.62): the 2 s minimum
+merges some short possessions, the trade-off section 6 lists. Over the full match it predicts 253
+possessions (mean 22.3 s); of the 158,857 graded frames, 47.7% are H, 41.0% A and 11.3% D. The
+build is deterministic: `make reproduce` rebuilds a byte-identical file
+(SHA-256 `1d6970d2e619c4bc0dd1d97ff0119b88a9040a7180ace9d8054a809c69efddfc`).
 
 ### How the public window was used
 Only to check correctness. The first version predicted **2 possessions** on the public window.

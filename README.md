@@ -23,7 +23,7 @@ literature, the Laws of the Game, or design choices fixed before any scoring. Ea
 
 **Competition match, public 5-minute window** (17 possessions, a correctness check only, never
 used to choose anything): v1 scored spellF1 0.388 against 0.326 for the published floor
-`baseline_smooth50`. v2: TODO.
+`baseline_smooth50`; v2 scored 0.455.
 
 ## How it works
 
