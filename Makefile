@@ -1,7 +1,7 @@
 # One entry point for everything. `make submission TEAM=<name>` is the command that regenerates
 # the file we upload. Recipes need real tabs.
 
-TEAM    ?= team_name
+TEAM    ?= DX_Lab_Team_3
 PY      := uv run --frozen python
 SUB     := submissions/$(TEAM).csv
 
