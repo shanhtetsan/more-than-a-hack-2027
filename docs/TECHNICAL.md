@@ -40,10 +40,17 @@ We chose a rule-based system over a learned model on purpose:
 | Tactical video | No | Not needed for a position-based method. The rules also forbid checking output against it. |
 | Broadcast recording | No | Not synchronised to the tactical timeline, and its homography covers only 65.8% of frames. |
 | ATD `ball_state` / `ball_owning_team_id` | Checked, dropped | Empty on every frame of this file. |
+| SkillCorner open data (other games) | **Yes, tuning and validation** | 20 A-League 2024/25 matches (MIT licence) with provider possession labels. Used to choose three parameter values and to measure the method on matches it was not built on (section 5). Never mixed into the competition run. |
 
-| SkillCorner open data | **Yes, for validation only** | 20 A-League 2024/25 matches (MIT licence) with provider possession labels. Used to choose three parameter values and to measure the method on matches it was not built on (section 5). Never mixed into the competition run. |
+No pre-trained models. No hand labels and no human-produced data about the provided game.
 
-No pre-trained models, no manual labels.
+### Labelled data used (all from other games)
+
+| Dataset | Source | Who labelled it | How much | Used for |
+|---|---|---|---|---|
+| SkillCorner open data, A-League 2024/25 | https://github.com/SkillCorner/opendata, revision `4340d27`, MIT licence | SkillCorner (the provider's own "phases of play" and dynamic events, shipped with the dataset). We added no labels. | 20 matches: 10 development, 10 held-out | Choosing three parameter values (development) and measuring the method (held-out). See section 5. |
+
+No model was trained. Nothing labelled comes from the provided game.
 
 ## 3. Pipeline and possession rules
 
@@ -184,7 +191,8 @@ Caveat: SkillCorner is broadcast tracking from a different league and provider, 
 possession definition, so absolute numbers do not transfer to the competition match. What
 transfers is the direction: these settings generalise across 20 matches rather than fitting one.
 
-Reproduce: `make external` (downloads the pinned SkillCorner revision to `external_data/`).
+Reproduce: `make external-sweep` for the study above and `make external` for the 20-match scores
+(both download the pinned SkillCorner revision to `external_data/`).
 
 ### Competition match, public 5-minute window (correctness check only)
 
@@ -243,6 +251,7 @@ uv sync --frozen                    # Python 3.11, exact versions from uv.lock
 make submission TEAM=DX_Lab_Team_3  # writes submissions/DX_Lab_Team_3.csv, validates, scores
 make reproduce  TEAM=DX_Lab_Team_3  # builds twice and checks the files are byte-identical
 make external                       # external validation on SkillCorner open data
+make external-sweep                 # the parameter study: 24-setting grid on 10 matches, held-out check on 10
 make test                           # unit tests on synthetic data only
 ```
 

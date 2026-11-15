@@ -54,6 +54,7 @@ uv sync --frozen                    # Python 3.11, exact pins from uv.lock
 make submission TEAM=DX_Lab_Team_3  # build -> validate -> score on the public window
 make reproduce  TEAM=DX_Lab_Team_3  # rebuild twice, check the file is byte-identical
 make external                       # external validation on 20 SkillCorner matches
+make external-sweep                 # the parameter study behind v2 (dev grid + held-out check)
 make test                           # unit tests on synthetic data, no match data needed
 ```
 

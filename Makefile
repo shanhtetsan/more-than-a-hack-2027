@@ -6,7 +6,7 @@ PY      := uv run --frozen python
 SUB     := submissions/$(TEAM).csv
 
 .PHONY: help setup verify-scorer check-data baselines submission validate score score-all \
-        reproduce external test lint format clean
+        reproduce external external-sweep test lint format clean
 
 help:            ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -47,6 +47,9 @@ reproduce: check-data  ## rebuild twice and check the file is byte-identical
 external:        ## score the pipeline on 20 SkillCorner open-data matches (external validation)
 	$(PY) -m external.evaluate
 	$(PY) -m external.evaluate --baseline 50
+
+external-sweep:  ## the v1 -> v2 parameter study on SkillCorner (dev grid, held-out check)
+	$(PY) -m external.sweep
 
 test:            ## smoke tests (no match data needed)
 	uv run --frozen pytest -q
