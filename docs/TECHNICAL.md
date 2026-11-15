@@ -249,7 +249,7 @@ Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v
 
 | | spellF1 | macroF1 | possessions | mean duration | fragmentation |
 |---|---|---|---|---|---|
-| **DX Lab Team 3 (v3, submitted)** | TODO | TODO | TODO | TODO | TODO |
+| **DX Lab Team 3 (v3, submitted)** | **0.547** | 0.773 | 13 | 20.7 s | 0.76 |
 | DX Lab Team 3 (v2) | 0.455 | 0.599 | 12 | 24.3 s | 0.62 |
 | DX Lab Team 3 (v1) | 0.388 | 0.601 | 16 | 18.2 s | 0.81 |
 | `baseline_smooth125` | 0.424 | 0.581 | 16 | 18.5 s | 0.81 |
@@ -262,7 +262,16 @@ is submitted whatever its public score: 17 possessions cannot tell versions apar
 organisers' own baselines reorder between this window and the full match), and choosing by it
 would be fitting to the ground truth.
 
-TODO-V3-SUMMARY
+For what it is worth, each step also scores higher here: 0.388 (v1), 0.455 (v2), 0.547 (v3), and
+macroF1 rises from 0.599 to 0.773 with the stoppage detector.
+
+Sanity checks on the full match (counts only, no ground truth involved): the detector behaves on
+the competition tracking as it did on the external games. The mean player speed has quartiles
+0.97 / 1.45 / 2.21 m/s, it marks 142 stoppages, and v3 calls 40.1% of the 158,857 graded frames
+dead (35.5% H, 24.4% A), against 11.3% for v2 and 39-46% in the external providers' labels. It
+predicts 313 possessions (mean 12.2 s). The build is deterministic: `make reproduce` rebuilds a
+byte-identical file
+(SHA-256 `0a37f9ad49582c3d5bd9b3e30fe3c9ef78a1ccf62676f23bf8e08b59edd2f2d4`).
 
 ### How the public window was used
 Only to check correctness. The first version predicted **2 possessions** on the public window.
