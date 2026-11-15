@@ -1,4 +1,4 @@
-"""The v1 possession rules, as pure functions on arrays. No file I/O, so all of it is unit-tested
+"""The possession rules, as pure functions on arrays. No file I/O, so all of it is unit-tested
 on synthetic data (tests/test_possession.py).
 
 Internal codes: HOME=0, AWAY=1, DEAD=2, NOX=3 (abstain), NONE=-1 (no answer yet / no control).
@@ -317,6 +317,78 @@ def assign_states(confirmed, out_start, inside, restarts, first, last,
     return labels
 
 
+# --- (5b) stoppages from collective movement ------------------------------------------------
+
+def collective_speed(players, span, max_speed, min_players, fps=25):
+    """Mean player speed (m/s) per frame, from each track slot's displacement over `span` frames
+    centred on the frame. A slot counts only where it has a position at both ends and the
+    implied speed is at most `max_speed` (a faster "player" is a track swap, not a sprint).
+    NaN where fewer than `min_players` slots count.
+    """
+    players = np.asarray(players, dtype=np.float32)
+    n = len(players)
+    speed = np.full(n, np.nan)
+    if n <= span:
+        return speed
+    lead = span // 2
+    step = players[span:] - players[:-span]
+    v = np.hypot(step[..., 0], step[..., 1]) * (fps / span)
+    ok = ~np.isnan(v) & (v <= max_speed)
+    count = ok.sum(axis=1)
+    total = np.where(ok, v, 0.0).sum(axis=1)
+    speed[lead:lead + len(v)] = np.where(count >= min_players, total / np.maximum(count, 1),
+                                         np.nan)
+    return speed
+
+
+def rolling_mean(values, window):
+    """Centred mean over `window` frames, ignoring NaN; NaN where the window holds no value."""
+    values = np.asarray(values, dtype=float)
+    if window <= 1:
+        return values.copy()
+    ok = ~np.isnan(values)
+    kernel = np.ones(int(window))
+    total = np.convolve(np.where(ok, values, 0.0), kernel, mode="same")
+    count = np.convolve(ok.astype(float), kernel, mode="same")
+    return np.where(count > 0, total / np.maximum(count, 1), np.nan)
+
+
+def ball_speed(ball, span, fps=25):
+    """Ball speed (m/s) per frame from its displacement over `span` frames centred on the frame;
+    NaN where it has no position at either end."""
+    ball = np.asarray(ball, dtype=float)
+    speed = np.full(len(ball), np.nan)
+    if len(ball) > span:
+        step = ball[span:] - ball[:-span]
+        speed[span // 2:span // 2 + len(step)] = np.hypot(step[:, 0], step[:, 1]) * (fps / span)
+    return speed
+
+
+def stoppage_frames(players, cfg, ball=None):
+    """True on frames where play looks stopped: the smoothed collective speed is below
+    cfg.STOPPAGE_SPEED_MPS for a run of at least cfg.STOPPAGE_MIN_FRAMES. All False when the
+    threshold is 0 (detector off).
+
+    With `ball` and cfg.STOPPAGE_BALL_MPS > 0, a frame where the ball is seen travelling at that
+    smoothed speed or more is never a stoppage: slow players around a moving ball is slow
+    build-up, not a dead ball. An unseen ball vetoes nothing."""
+    n = len(players)
+    if not cfg.STOPPAGE_SPEED_MPS:
+        return np.zeros(n, dtype=bool)
+    speed = collective_speed(players, cfg.STOPPAGE_SPAN_FRAMES, cfg.STOPPAGE_MAX_PLAYER_MPS,
+                             cfg.STOPPAGE_MIN_PLAYERS)
+    slow = rolling_mean(speed, cfg.STOPPAGE_WINDOW_FRAMES) < cfg.STOPPAGE_SPEED_MPS
+    if ball is not None and cfg.STOPPAGE_BALL_MPS:
+        moving = rolling_mean(ball_speed(ball, cfg.STOPPAGE_SPAN_FRAMES),
+                              cfg.STOPPAGE_WINDOW_FRAMES) >= cfg.STOPPAGE_BALL_MPS
+        slow &= ~moving
+    starts, lengths, values = run_lengths(slow)
+    for start, length, value in zip(starts, lengths, values, strict=True):
+        if value and length < cfg.STOPPAGE_MIN_FRAMES:
+            slow[start:start + length] = False
+    return slow
+
+
 # --- (6) short-run merging ------------------------------------------------------------------
 
 def merge_short_runs(labels, min_team, min_dead):
@@ -382,12 +454,28 @@ def run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restart
     goal_mouth = goal_mouth_exit(ball, cfg.PITCH_LENGTH_M, cfg.PITCH_WIDTH_M, cfg.OUT_MARGIN_M,
                                  cfg.GOAL_HALF_WIDTH_M + cfg.GOAL_MOUTH_MARGIN_M)
 
+    stopped = stoppage_frames(players, cfg, ball)
+
     stats = new_stats()
+    graded = np.zeros(n_frames, dtype=bool)
+    for _, first, last in blocks:
+        graded[first:last + 1] = True
+    speed = collective_speed(players, cfg.STOPPAGE_SPAN_FRAMES, cfg.STOPPAGE_MAX_PLAYER_MPS,
+                             cfg.STOPPAGE_MIN_PLAYERS)[graded]
+    known = speed[~np.isnan(speed)]
+    stats["stoppage"] = {
+        "frames": int(stopped[graded].sum()),
+        "runs": int(np.sum(stopped[1:] & ~stopped[:-1] & graded[1:])),
+        "speed known": int(len(known)),
+        "speed quartiles": [round(float(q), 2) for q in np.percentile(known, [25, 50, 75])]
+        if len(known) else [],
+    }
     codes = np.full(n_frames, NOX, dtype=np.int8)
     for _, first, last in blocks:
         states = assign_states(confirmed, out_start, inside, restarts, first, last,
                                goal_mouth, goal_restarts, stats)
         states[states == NONE] = NOX
+        states[stopped[first:last + 1]] = DEAD
         codes[first:last + 1] = merge_short_runs(
             states, cfg.MIN_TEAM_RUN_FRAMES, cfg.MIN_DEAD_RUN_FRAMES)
     stats.update(match_counts(codes, raw_seen, ~np.isnan(ball).any(axis=1), confirmed, blocks))

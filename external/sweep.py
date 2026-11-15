@@ -1,4 +1,5 @@
-"""The parameter study behind v2, on SkillCorner open data only (never the competition match).
+"""The v1 -> v2 parameter study (stoppage detector off), on SkillCorner open data only (never the
+competition match).
 
     uv run --frozen python -m external.sweep
 
@@ -21,8 +22,11 @@ V1 = {"MIN_CONFIRMED_FRAMES": "8", "CONTROL_RADIUS_M": "1.5", "MIN_TEAM_RUN_FRAM
 V2 = {"MIN_CONFIRMED_FRAMES": "12", "CONTROL_RADIUS_M": "2.0", "MIN_TEAM_RUN_FRAMES": "50"}
 
 
+OFF = {"STOPPAGE_SPEED_MPS": "0"}  # this study predates the v3 stoppage detector
+
+
 def spell(mids, overrides):
-    return np.array([evaluate.score_match(m, overrides)["spell_f1_mean"] for m in mids])
+    return np.array([evaluate.score_match(m, overrides | OFF)["spell_f1_mean"] for m in mids])
 
 
 def main():

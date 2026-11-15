@@ -18,7 +18,10 @@ machine, instead of smoothing a per-frame guess:
 - anything short of that (a deflection, a contested ball, a pass in flight, a frame where the
   tracking lost the ball) **keeps the previous state**;
 - the ball is **dead** when it is clearly out of the pitch, and stays dead until a **restart**,
-  taken from Smart Tagging, or until play has visibly resumed.
+  taken from Smart Tagging, or until play has visibly resumed;
+- the ball is also **dead while play is stopped**: when the players are collectively slow for
+  several seconds, with no ball seen moving among them. This catches fouls, injuries and the wait
+  before a restart, and it needs neither the ball nor player identities.
 
 We chose a rule-based system over a learned model on purpose:
 
@@ -40,7 +43,8 @@ We chose a rule-based system over a learned model on purpose:
 | Tactical video | No | Not needed for a position-based method. The rules also forbid checking output against it. |
 | Broadcast recording | No | Not synchronised to the tactical timeline, and its homography covers only 65.8% of frames. |
 | ATD `ball_state` / `ball_owning_team_id` | Checked, dropped | Empty on every frame of this file. |
-| SkillCorner open data (other games) | **Yes, tuning and validation** | 20 A-League 2024/25 matches (MIT licence) with provider possession labels. Used to choose three parameter values and to measure the method on matches it was not built on (section 5). Never mixed into the competition run. |
+| SkillCorner open data (other games) | **Yes, tuning and validation** | 20 A-League 2024/25 matches (MIT licence) with provider possession labels. Used to choose parameter values and to measure the method on matches it was not built on (section 5). Never mixed into the competition run. |
+| Metrica public sample games 1 and 2 (other games) | **Yes, tuning and validation** | Same provider and frame rate as the competition tracking. Used to set and test the stoppage detector (section 5). |
 
 No pre-trained models. No hand labels and no human-produced data about the provided game.
 
@@ -48,7 +52,8 @@ No pre-trained models. No hand labels and no human-produced data about the provi
 
 | Dataset | Source | Who labelled it | How much | Used for |
 |---|---|---|---|---|
-| SkillCorner open data, A-League 2024/25 | https://github.com/SkillCorner/opendata, revision `4340d27`, MIT licence | SkillCorner (the provider's own "phases of play" and dynamic events, shipped with the dataset). We added no labels. | 20 matches: 10 development, 10 held-out | Choosing three parameter values (development) and measuring the method (held-out). See section 5. |
+| SkillCorner open data, A-League 2024/25 | https://github.com/SkillCorner/opendata, revision `4340d27`, MIT licence | SkillCorner (the provider's own "phases of play" and dynamic events, shipped with the dataset). We added no labels. | 20 matches: 10 development, 10 held-out | Choosing parameter values (development) and measuring the method (held-out). See section 5. |
+| Metrica Sports sample data, games 1 and 2 (anonymised) | https://github.com/metrica-sports/sample-data, revision `e706dd5` (public; the repository asks for acknowledgement) | Metrica Sports: dead ball is where their tracking gives the ball no position; possession is the team of their latest on-ball event. We added no labels. | 2 matches: game 1 development, game 2 held-out | Setting and testing the stoppage detector. See section 5. |
 
 No model was trained. Nothing labelled comes from the provided game.
 
@@ -63,7 +68,9 @@ flowchart LR
     B --> G[4. Ball out of play<br/>&gt;0.5 m out, ≥5 frames]
     D --> F[5. State machine]
     G --> F
+    A --> S[5b. Stoppage<br/>players slow ≥3 s]
     F --> H[6. Merge short runs]
+    S --> H
     H --> I[7. X outside graded halves]
 ```
 
@@ -102,7 +109,25 @@ a defender gives a few frames of proximity at most, not half a second of unconte
 - **Start of each half:** the half starts dead and goes live at its kickoff tag. A tag whose
   window covers the first graded frame fires on that frame.
 
-### 3.5 The state machine
+### 3.5 Stoppages (dead ball without the ball leaving the pitch)
+Most dead-ball time is not the ball crossing a line: it is fouls, injuries, substitutions and the
+wait before a restart. On external data, the ball-out rule alone called 15–22% of frames dead
+where the providers' labels have 39–46%.
+
+So a frame is also `D` while **play is stopped**:
+- each track slot's speed is its displacement over 1 s (this averages out tracking jitter; a slot
+  implying more than 12 m/s is a track swap and is ignored);
+- the **mean player speed**, averaged over a 3 s window, is below **1.35 m/s**, for **at least
+  3 s**. On both external providers the mean speed is around 1.0 m/s when the ball is dead and
+  2.0 m/s when it is live;
+- **veto:** where the ball is seen travelling at 3 m/s or more, slow players mean slow build-up,
+  not a stoppage. A missing ball vetoes nothing, so the rule works through ball gaps.
+
+The state machine keeps running underneath. When play resumes, possession is whatever it holds:
+the previous team, unless the other team took confirmed control during the stoppage (for example
+picking the ball up for a free kick).
+
+### 3.6 The state machine
 While the ball is live, possession changes **only** when the *other* team gets confirmed control.
 Frames with no control, contested frames and frames without a ball keep the current team.
 
@@ -117,13 +142,13 @@ stateDiagram-v2
     Away --> Dead: ball out of play
 ```
 
-### 3.6 Short runs and ungraded time
+### 3.7 Short runs and ungraded time
 - Possession runs and dead-ball runs shorter than **2 s (50 frames)** are merged into the run
   before them. A flicker should not count as a possession.
 - Frames outside the two graded halves (before kickoff, half-time, after the final whistle) are
   `X`.
 
-### 3.7 Where we drew the lines
+### 3.8 Where we drew the lines
 
 | Situation | Our rule |
 |---|---|
@@ -133,12 +158,13 @@ stateDiagram-v2
 | Pass in flight | Previous team keeps possession until a player controls it |
 | Throw-in, corner, goal kick, free kick | Dead from ball-out until the restart tag |
 | Goal | Dead until the kickoff |
-| Foul (ball stays on the pitch) | Not detected: play is treated as live (see Limitations) |
+| Foul, injury, substitution (ball stays on the pitch) | Dead while the players are collectively slow for 3 s or more |
+| Slow build-up, keeper holding the ball | Live: a seen, moving ball vetoes the stoppage rule; short lulls under 3 s are ignored |
 
 ## 4. Parameters and where they come from
 
-Nothing was trained, and nothing was tuned on the competition match. Three values were chosen on
-**external** data (SkillCorner, section 5); the rest come from the literature, the Laws of the
+Nothing was trained, and nothing was tuned on the competition match. The values marked
+"External data" were chosen on **other games** (SkillCorner and Metrica sample data, section 5); the rest come from the literature, the Laws of the
 Game, or design choices fixed before any scoring. Every value is in `src/possession/config.py`,
 with its source.
 
@@ -150,6 +176,10 @@ with its source.
 | Minimum possession run | 50 frames (2 s) | **External data.** v1 used 1 s from Link & Hoernig (2017); 2 s was better in 11 of 12 settings on SkillCorner |
 | Goal half-width | 3.66 m | IFAB Laws of the Game, Law 1 (7.32 m between the posts) |
 | Confirmed control | 12 frames | **External data.** v1 used 8 (design choice); 8, 12 and 16 were within 0.008 at 2 m, so we took the middle |
+| Stoppage: mean player speed | below 1.35 m/s | **External data.** 1.2–1.5 scored alike; middle taken |
+| Stoppage: smoothing window and minimum length | 75 frames (3 s) each | **External data** (3 s against 5 s minimum; window fixed) |
+| Stoppage: ball veto | seen ball at 3 m/s or more | **External data.** 2 and 3 m/s scored alike |
+| Stoppage: speed span, swap cut-off, minimum slots | 1 s, 12 m/s, 6 slots | Design choice (jitter and track swaps) |
 | Out-of-pitch margin and run | 0.5 m, 5 frames | Design choice, to reject tracking noise near the lines |
 | Goal-mouth margin | 0.5 m | Design choice, same as the out margin |
 | Minimum dead-ball run | 50 frames (2 s) | Design choice |
@@ -180,42 +210,59 @@ scored **once** on the held-out matches.
 |---|---|---|---|
 | Organisers' baseline (`smooth50`) | — | — | 0.350 |
 | v1 (8 frames, 1.5 m, 1 s) | 0.442 | 0.437 | 0.439 |
-| **v2 (12 frames, 2.0 m, 2 s), submitted** | 0.475 | **0.470** | 0.473 |
+| v2 (12 frames, 2.0 m, 2 s) | 0.475 | 0.470 | 0.473 |
+| **v3 (v2 + stoppage detector), submitted** | 0.504 | **0.487** | 0.496 |
 
 On the held-out matches v2 beats v1 on **9 of 10**, by +0.033 on average (paired bootstrap 95%
 interval [+0.020, +0.046]). Both versions beat the organisers' baseline by a wide margin on data
 neither was built on. The best region of the grid was flat (8–16 frames at 2 m within 0.008),
 so we took its middle rather than its single best point.
 
+**Stoppage detector (v2 → v3).** Developed on the 10 SkillCorner development matches and Metrica
+sample game 1, with an 18-setting grid (speed 1.2/1.35/1.5 m/s × ball veto off/2/3 m/s × minimum
+3/5 s). Game 1 was scored twice: as published, and with the ball hidden on 40% of frames in
+bursts, to mimic tracking that loses the ball. The chosen setting was then run on the held-out
+data:
+
+| Held-out, spellF1 (macroF1) | v2 | **v3** |
+|---|---|---|
+| SkillCorner, 10 matches | 0.470 (0.627) | **0.487** (0.690), better on 9 of 10, 95% interval of the gain [+0.010, +0.026] |
+| Metrica sample game 2 | 0.365 (0.553) | **0.467** (0.824) |
+| Metrica sample game 2, ball hidden on 40% of frames | 0.239 (0.495) | **0.377** (0.793) |
+
+On game 2, v3 calls 33% of frames dead against 41% in the provider's data; v2 called 7%.
+Two caveats. In the Metrica sample games the ball has no position while out of play, so the
+ball-out rule cannot fire there and the v2 → v3 gap overstates the gain. And the SkillCorner
+held-out matches had already been used once, for the v1 → v2 check.
+
+We also re-ran the three v2 possession parameters with the detector on. The two providers
+disagreed on the best values and the differences were small, so they stay as in v2.
+
 Caveat: SkillCorner is broadcast tracking from a different league and provider, with its own
 possession definition, so absolute numbers do not transfer to the competition match. What
 transfers is the direction: these settings generalise across 20 matches rather than fitting one.
 
-Reproduce: `make external-sweep` for the study above and `make external` for the 20-match scores
+Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v3) and `make external` for the 20-match scores
 (both download the pinned SkillCorner revision to `external_data/`).
 
 ### Competition match, public 5-minute window (correctness check only)
 
 | | spellF1 | macroF1 | possessions | mean duration | fragmentation |
 |---|---|---|---|---|---|
-| **DX Lab Team 3 (v2, submitted)** | **0.455** | 0.599 | 12 | 24.3 s | 0.62 |
+| **DX Lab Team 3 (v3, submitted)** | TODO | TODO | TODO | TODO | TODO |
+| DX Lab Team 3 (v2) | 0.455 | 0.599 | 12 | 24.3 s | 0.62 |
 | DX Lab Team 3 (v1) | 0.388 | 0.601 | 16 | 18.2 s | 0.81 |
 | `baseline_smooth125` | 0.424 | 0.581 | 16 | 18.5 s | 0.81 |
 | `baseline_smooth50` (published floor) | 0.326 | 0.621 | 26 | 10.8 s | 1.43 |
 | `baseline_raw` | 0.038 | 0.597 | 131 | 2.0 s | 6.52 |
 | Ground truth | — | — | 17 | 14.2 s | — |
 
-v2 was chosen on external data **before** it was run on the competition match, and it is
-submitted whatever its public score: 17 possessions cannot tell versions apart reliably (the
+Each version was chosen on external data **before** it was run on the competition match, and v3
+is submitted whatever its public score: 17 possessions cannot tell versions apart reliably (the
 organisers' own baselines reorder between this window and the full match), and choosing by it
 would be fitting to the ground truth.
 
-For what it is worth, v2 also scores higher here than v1 (0.455 against 0.388). It predicts
-slightly too few possessions on this window (12 against 17, fragmentation 0.62): the 2 s minimum
-merges some short possessions, the trade-off section 6 lists. Over the full match it predicts 253
-possessions (mean 22.3 s); of the 158,857 graded frames, 47.7% are H, 41.0% A and 11.3% D. The
-build is deterministic: `make reproduce` rebuilds a byte-identical file
-(SHA-256 `1d6970d2e619c4bc0dd1d97ff0119b88a9040a7180ace9d8054a809c69efddfc`).
+TODO-V3-SUMMARY
 
 ### How the public window was used
 Only to check correctness. The first version predicted **2 possessions** on the public window.
@@ -227,9 +274,13 @@ is a bug fix, not a parameter change, and no parameter value changed as a result
 
 ## 6. Limitations, and what we would do next
 
-- **Fouls are not detected.** The ball stays on the pitch, so those stoppages read as live play.
-  Next step: detect a stoppage from collective movement, such as team-wide speed collapsing while
-  the ball stands still, as in published work on detecting game interruptions from tracking data.
+- **The stoppage rule is a single threshold.** On Metrica sample game 1 it finds roughly three
+  quarters of the dead-ball frames, with similar precision, and it starts late and ends early by a second or two
+  because of its 3 s window. Quick restarts are missed, and a long slow spell with the ball
+  untracked can be called dead. Next step: a small classifier on player-movement features over a
+  longer context, trained on other games, as in published work on game-interruption detection.
+- **The speed threshold was set on cleaner tracking.** If automatic tracking jitter inflates
+  speeds, the detector fires less often, which falls back towards v2 rather than breaking.
 - **Long ball gaps.** When the ball is missing for more than 1 s, the state holds, so a change of
   possession inside the gap is found late or missed. Next step: infer the ball's likely side from
   team shape and movement, or estimate the ball's position with a Kalman smoother.
@@ -251,7 +302,8 @@ uv sync --frozen                    # Python 3.11, exact versions from uv.lock
 make submission TEAM=DX_Lab_Team_3  # writes submissions/DX_Lab_Team_3.csv, validates, scores
 make reproduce  TEAM=DX_Lab_Team_3  # builds twice and checks the files are byte-identical
 make external                       # external validation on SkillCorner open data
-make external-sweep                 # the parameter study: 24-setting grid on 10 matches, held-out check on 10
+make external-sweep                 # v1 -> v2 study: 24-setting grid on 10 matches, held-out check on 10
+make external-stoppage              # v2 -> v3 study: stoppage detector, SkillCorner + Metrica sample games
 make test                           # unit tests on synthetic data only
 ```
 
@@ -261,8 +313,9 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
 ## 8. Compliance
 
 - Labels come from the algorithm only. There is no hand annotation and no manual data.
-- Nothing was trained, fitted or calibrated on the ground truth or the video. Three parameters
-  were chosen on external data (SkillCorner, MIT licence), as the rules allow. The public ground
+- Nothing was trained, fitted or calibrated on the ground truth or the video. Parameters were
+  chosen on external data about other games (SkillCorner and Metrica sample data), as the rules
+  allow. The public ground
   truth was used for correctness checks only (section 5).
 - We did not check our output against the video.
 
@@ -273,6 +326,7 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
 - Link, D., & Hoernig, M. (2017). Individual ball possession in soccer. *PLoS ONE*, 12(7),
   e0179953.
 - SkillCorner open data, https://github.com/SkillCorner/opendata (revision 4340d27), MIT licence.
+- Metrica Sports sample data, https://github.com/metrica-sports/sample-data (revision e706dd5).
 - databallpy (Alek050/databallpy), `add_individual_player_possession` and tracking-quality checks.
 - IFAB, *Laws of the Game*, Law 1: The Field of Play.
 - kloppy (PySport), Metrica EPTS reader.

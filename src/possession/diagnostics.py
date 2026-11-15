@@ -53,6 +53,11 @@ def summary_lines(stats, types, blocks):
     lines.append(f"  {'total':<24} {total['parsed']:>4} {total['in graded']:>4} "
                  f"{total['ended a D']:>4}")
 
+    stop = stats.get("stoppage")
+    if stop is not None:
+        lines.append(f"stoppages from collective speed: {stop['runs']} runs, {stop['frames']} "
+                     f"graded frames; speed known on {stop['speed known']} graded frames, "
+                     f"quartiles (m/s) {stop['speed quartiles']}")
     runs = stats["confirmed_runs"]
     lines.append(f"confirmed-control runs in graded frames: H {runs['H']}  A {runs['A']}")
     final = stats["final"]

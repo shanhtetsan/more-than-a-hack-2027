@@ -67,6 +67,19 @@ def score_match(mid, overrides, window=None, cache={}):  # noqa: B006  (per-proc
                                                 "gt_poss": res["n_gt_spells"]}
 
 
+def score_arrays(m, overrides):
+    """Official metrics for one loaded match dict (skillcorner or metrica_sample)."""
+    cfg = make_cfg(m["length"], m["width"], overrides)
+    labels, _ = core.run_match(m["ball"], m["players"], m["team"], m["restarts"], m["n_frames"],
+                               m["blocks"], cfg, m["goal_restarts"])
+    res = pm.evaluate(pm.label_codes(m["gt"]), pm.label_codes(labels), bootstrap_n=0)
+    graded = m["gt"] != "X"
+    return {"spell_f1_mean": float(res["spell_f1_mean"]), "macro_f1": float(res["macro_f1"]),
+            "poss": res["n_pred_spells"], "gt_poss": res["n_gt_spells"],
+            "dead": float(np.mean(labels[graded] == "D")),
+            "gt_dead": float(np.mean(m["gt"][graded] == "D"))}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--matches", type=int, nargs="*", help="SkillCorner match ids (default: all)")

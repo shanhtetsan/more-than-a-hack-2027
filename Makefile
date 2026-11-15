@@ -6,7 +6,7 @@ PY      := uv run --frozen python
 SUB     := submissions/$(TEAM).csv
 
 .PHONY: help setup verify-scorer check-data baselines submission validate score score-all \
-        reproduce external external-sweep test lint format clean
+        reproduce external external-sweep external-stoppage test lint format clean
 
 help:            ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ external:        ## score the pipeline on 20 SkillCorner open-data matches (exte
 
 external-sweep:  ## the v1 -> v2 parameter study on SkillCorner (dev grid, held-out check)
 	$(PY) -m external.sweep
+
+external-stoppage: ## the v2 -> v3 study: stoppage detector on SkillCorner + Metrica sample games
+	$(PY) -m external.stoppage_study
 
 test:            ## smoke tests (no match data needed)
 	uv run --frozen pytest -q

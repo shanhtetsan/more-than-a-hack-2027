@@ -1,6 +1,6 @@
 """Build the submission file: data in, frame,label CSV out.
 
-Rule-based pipeline, v2 parameters (every number is in config.py, every rule in core.py):
+Rule-based pipeline, v3 (every number is in config.py, every rule in core.py):
   1. tactical ATD via kloppy, scaled to metres with the games.py pitch
   2. ball gaps of <= 25 frames linearly interpolated
   3. per-frame control: nearest player <= 2.0 m from the ball, no opponent <= 1.0 m
@@ -11,6 +11,8 @@ Rule-based pipeline, v2 parameters (every number is in config.py, every rule in 
      with a team's confirmed control (possession to that team). A possible goal (exit over a
      goal line between the posts, +0.5 m) ends only at the next kickoff, goal-kick or
      corner tag
+  5b. also D while play is stopped: mean player speed < 1.35 m/s (3 s window) for >= 3 s,
+     unless the ball is seen moving at >= 3 m/s
   6. H/A runs < 50 frames and D runs < 50 frames merged into their neighbour
   7. X outside the graded halves
 """

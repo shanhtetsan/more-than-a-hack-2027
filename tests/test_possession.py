@@ -636,6 +636,74 @@ def test_kickoff_tag_opening_before_the_period_starts_play_on_its_first_frame():
     assert stats["period_start_frames"] == [280]
 
 
+# --- (5b) stoppages -------------------------------------------------------------------------
+
+def movers(n, speed_mps, n_players=8):
+    """n frames of n_players all moving along x at `speed_mps` (may be a per-frame array)."""
+    x = np.cumsum(np.broadcast_to(np.asarray(speed_mps, float) / 25.0, (n,)))
+    players = np.zeros((n, n_players, 2), dtype=np.float32)
+    players[:, :, 0] = x[:, None] + np.arange(n_players) * 3.0
+    players[:, :, 1] = 30.0
+    return players
+
+
+def stop_cfg(**over):
+    cfg = types.SimpleNamespace(**{k: getattr(config, k) for k in dir(config) if k.isupper()})
+    for key, value in over.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def test_collective_speed_measures_ignores_swaps_and_needs_enough_players():
+    players = movers(200, 2.0)
+    speed = core.collective_speed(players, 25, 12.0, 6)
+    assert np.isnan(speed[:12]).all() and np.isnan(speed[-13:]).all()
+    assert np.allclose(speed[12:-13], 2.0, atol=1e-3)
+    players[100:, 0, 0] += 500.0                      # one slot jumps: a track swap
+    swapped = core.collective_speed(players, 25, 12.0, 6)
+    assert np.allclose(swapped[12:-13], 2.0, atol=1e-3)
+    assert np.isnan(core.collective_speed(players[:, :5], 25, 12.0, 6)).all()
+
+
+def test_rolling_mean_ignores_nan():
+    out = core.rolling_mean(np.array([1.0, np.nan, 3.0, np.nan, np.nan, np.nan]), 3)
+    assert np.allclose(out[:4], [1.0, 2.0, 3.0, 3.0]) and np.isnan(out[4:]).all()
+
+
+def test_stoppage_needs_slow_players_for_long_enough():
+    speeds = np.r_[np.full(300, 3.0), np.full(300, 0.5), np.full(300, 3.0),
+                   np.full(40, 0.5), np.full(300, 3.0)]
+    stopped = core.stoppage_frames(movers(len(speeds), speeds), stop_cfg())
+    assert stopped[350:550].all()                     # the 12 s lull
+    assert not stopped[:250].any() and not stopped[650:].any()  # the 1.6 s lull is too short
+    assert not core.stoppage_frames(movers(len(speeds), speeds),
+                                    stop_cfg(STOPPAGE_SPEED_MPS=0.0)).any()
+
+
+def test_stoppage_vetoed_by_a_seen_moving_ball_but_not_by_a_missing_one():
+    n = 600
+    players = movers(n, 0.5)
+    ball = np.column_stack([np.arange(n) * (5.0 / 25.0), np.full(n, 30.0)])  # 5 m/s
+    assert not core.stoppage_frames(players, stop_cfg(), ball)[50:-50].any()
+    still = np.tile([50.0, 30.0], (n, 1))
+    assert core.stoppage_frames(players, stop_cfg(), still)[50:-50].all()
+    assert core.stoppage_frames(players, stop_cfg(), np.full((n, 2), np.nan))[50:-50].all()
+
+
+def test_run_match_marks_a_stoppage_dead_and_resumes_with_the_holder():
+    n = 900
+    speeds = np.r_[np.full(300, 3.0), np.full(300, 0.4), np.full(300, 3.0)]
+    players = movers(n, speeds)
+    team = np.array([HOME] * 4 + [AWAY] * 4, dtype=np.int8)
+    ball = players[:, 0, :].astype(float) + (0.3, 0.0)   # home slot 0 carries the ball
+    players[:, 4:, 1] = 60.0                             # opponents far away
+    labels, stats = core.run_match(ball, players, team, {0: HOME}, n, [(1, 0, n - 1)],
+                                   stop_cfg(PITCH_LENGTH_M=10_000.0))
+    text = "".join(labels)
+    assert set(text[:250]) == {"H"} and set(text[350:550]) == {"D"} and set(text[650:]) == {"H"}
+    assert stats["stoppage"]["runs"] == 1
+
+
 # --- external harness ------------------------------------------------------------------------
 
 def test_external_resample_10_to_25_fps_is_linear_and_spreads_nan():

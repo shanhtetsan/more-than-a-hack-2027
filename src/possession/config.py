@@ -25,6 +25,8 @@ development matches; the chosen setting was then checked once on the other 10 he
 spellF1 0.437 (v1) -> 0.470 (v2), better on 9 of 10, paired bootstrap 95% CI of the gain
 [+0.020, +0.046]. The competition data, its ground truth and its video played no part.
 Reproduce: `make external` (v2) and docs/TECHNICAL.md section 5.
+
+v3 adds a stoppage detector (section 5b at the end of this file), also set on external data only.
 """
 
 import os
@@ -148,3 +150,43 @@ GRADED_BLOCKS = games.half_video_blocks(GAME)
 
 # Submission length: one row per tactical-video frame.
 N_FRAMES = games.source_frames("tactical", GAME)
+
+
+# --- (5b) stoppages from collective movement (v3) -----------------------------------------
+# v2 only saw a dead ball when the ball left the pitch, so fouls, injuries, substitutions and the
+# wait before a restart all read as live play. On external data v2 called 15-22% of graded frames
+# dead where the providers' labels have 39-46%.
+#
+# v3: play is also dead while the players are collectively slow -- the idea of Mueller et al.
+# style game-interruption detection from player movement alone, in its simplest form. It needs no
+# ball and no player identity, which suits tracking that loses the ball on ~41% of frames.
+#
+# All values below were set on EXTERNAL data only (never the competition match):
+#   development: Metrica public sample game 1 (same provider, 25 fps; "dead" = the ball has no
+#                position) and 10 SkillCorner matches;
+#   held-out:    Metrica sample game 2 and the other 10 SkillCorner matches.
+# Held-out result, v2 -> v3: SkillCorner spellF1 0.470 -> 0.487 (better on 9 of 10, paired
+# bootstrap 95% CI [+0.010, +0.026]); Metrica game 2 spellF1 0.365 -> 0.467, and 0.239 -> 0.377
+# with the ball hidden on 40% of frames. Reproduce: `make external-stoppage`.
+
+# Mean player speed (m/s) below which play counts as stopped. On both providers the mean speed
+# sits around 1.0 m/s when the ball is dead and 2.0 m/s when it is live. 1.2-1.5 scored alike on
+# the development data; 1.35 is the middle of that range. 0 switches the detector off (= v2).
+STOPPAGE_SPEED_MPS = 1.35
+
+# The speed is averaged over a centred window this long, and a stoppage must last at least this
+# long (3 s each). Shorter lulls are slow play, not stoppages.
+STOPPAGE_WINDOW_FRAMES = 75
+STOPPAGE_MIN_FRAMES = 75
+
+# A slot's speed is its displacement over this many frames (1 s), which averages out tracking
+# jitter. A slot implying more than 12 m/s (faster than any sprint) is a track swap and is
+# ignored. With fewer than 6 usable slots the frame has no speed and is never a stoppage.
+STOPPAGE_SPAN_FRAMES = 25
+STOPPAGE_MAX_PLAYER_MPS = 12.0
+STOPPAGE_MIN_PLAYERS = 6
+
+# Veto: where the ball IS seen and travels at this smoothed speed or more, slow players mean slow
+# build-up, not a dead ball. 2-3 m/s scored alike on the development data. An unseen ball vetoes
+# nothing, so the detector still works through ball gaps.
+STOPPAGE_BALL_MPS = 3.0
