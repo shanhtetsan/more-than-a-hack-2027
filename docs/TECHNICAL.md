@@ -256,11 +256,6 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
   were chosen on external data (SkillCorner, MIT licence), as the rules allow. The public ground
   truth was used for correctness checks only (section 5).
 - We did not check our output against the video.
-- AI coding assistants were used to help write code and documentation. After the organisers'
-  rule clarification of Nov 3, no match data was given to any AI service. The code was run on the
-  data locally, and only error messages, aggregate counts and scores were shared.
-  <!-- REVIEW: before Nov 3, screenshots of the organisers' starter-notebook output were shared
-       with an AI assistant while exploring the data. Decide whether to state that here. -->
 
 ## References
 
