@@ -29,6 +29,13 @@ against 0.365 for v2.
 used to choose anything): v1 scored spellF1 0.388 against 0.326 for the published floor
 `baseline_smooth50`; v2 scored 0.455 and v3 0.547.
 
+![Mean spellF1 on 10 held-out SkillCorner matches: organisers' baseline 0.345, v1 0.437, v2 0.470, v3 0.487](docs/figures/versions.png)
+
+What the stoppage detector changes, on four minutes of a held-out Metrica sample game (public
+data from another match, not the competition match):
+
+![Timeline of possession labels: provider labels, v2 and v3. v3 recovers the two long dead-ball periods that v2 labels as possession.](docs/figures/timeline.png)
+
 ## How it works
 
 ```mermaid
@@ -63,6 +70,7 @@ make reproduce  TEAM=DX_Lab_Team_3  # rebuild twice, check the file is byte-iden
 make external                       # external validation on 20 SkillCorner matches
 make external-sweep                 # v1 -> v2 parameter study (dev grid + held-out check)
 make external-stoppage              # v2 -> v3 stoppage-detector study
+make figures                        # redraw docs/figures from the external games
 make test                           # unit tests on synthetic data, no match data needed
 ```
 

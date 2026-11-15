@@ -213,6 +213,8 @@ scored **once** on the held-out matches.
 | v2 (12 frames, 2.0 m, 2 s) | 0.475 | 0.470 | 0.473 |
 | **v3 (v2 + stoppage detector), submitted** | 0.504 | **0.487** | 0.496 |
 
+![Mean spellF1 on the 10 held-out SkillCorner matches: organisers' baseline 0.345, v1 0.437, v2 0.470, v3 0.487](figures/versions.png)
+
 On the held-out matches v2 beats v1 on **9 of 10**, by +0.033 on average (paired bootstrap 95%
 interval [+0.020, +0.046]). Both versions beat the organisers' baseline by a wide margin on data
 neither was built on. The best region of the grid was flat (8–16 frames at 2 m within 0.008),
@@ -231,6 +233,13 @@ data:
 | Metrica sample game 2, ball hidden on 40% of frames | 0.239 (0.495) | **0.377** (0.793) |
 
 On game 2, v3 calls 33% of frames dead against 41% in the provider's data; v2 called 7%.
+
+![Timeline of possession labels on four minutes of Metrica sample game 2: provider labels, v2 and v3. v3 recovers the two long dead-ball periods that v2 labels as possession.](figures/timeline.png)
+
+*Four minutes of the held-out Metrica sample game. v2 labels the two long stoppages as
+possession; v3 finds both. It also shows v3's typical errors: a stoppage that starts a few
+seconds late, and a short dead ball it misses.*
+
 Two caveats. In the Metrica sample games the ball has no position while out of play, so the
 ball-out rule cannot fire there and the v2 → v3 gap overstates the gain. And the SkillCorner
 held-out matches had already been used once, for the v1 → v2 check.
