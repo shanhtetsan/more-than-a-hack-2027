@@ -243,7 +243,7 @@ scored **once** on the held-out matches.
 | Organisers' baseline (`smooth50`) | — | — | 0.350 |
 | v1 (8 frames, 1.5 m, 1 s) | 0.442 | 0.437 | 0.439 |
 | v2 (12 frames, 2.0 m, 2 s) | 0.475 | 0.470 | 0.473 |
-| **v3 (v2 + stoppage detector), submitted** | 0.504 | **0.487** | 0.496 |
+| **v3 (v2 + stoppage detector)** | 0.504 | **0.487** | 0.496 |
 
 ![Mean spellF1 on the 10 held-out SkillCorner matches: organisers' baseline 0.345, v1 0.437, v2 0.470, v3 0.487](figures/versions.png)
 
@@ -307,7 +307,8 @@ Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v
 
 | | spellF1 | macroF1 | possessions | mean duration | fragmentation |
 |---|---|---|---|---|---|
-| **DX Lab Team 3 (v3, submitted)** | **0.547** | 0.773 | 13 | 20.7 s | 0.76 |
+| **DX Lab Team 3 (v4, submitted)** | **0.547** | 0.773 | 13 | 20.7 s | 0.76 |
+| DX Lab Team 3 (v3) | 0.547 | 0.773 | 13 | 20.7 s | 0.76 |
 | DX Lab Team 3 (v2) | 0.455 | 0.599 | 12 | 24.3 s | 0.62 |
 | DX Lab Team 3 (v1) | 0.388 | 0.601 | 16 | 18.2 s | 0.81 |
 | `baseline_smooth125` | 0.424 | 0.581 | 16 | 18.5 s | 0.81 |
@@ -315,21 +316,47 @@ Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v
 | `baseline_raw` | 0.038 | 0.597 | 131 | 2.0 s | 6.52 |
 | Ground truth | — | — | 17 | 14.2 s | — |
 
-Each version was chosen on external data **before** it was run on the competition match, and v3
+Each version was chosen on external data **before** it was run on the competition match, and v4
 is submitted whatever its public score: 17 possessions cannot tell versions apart reliably (the
 organisers' own baselines reorder between this window and the full match), and choosing by it
 would be fitting to the ground truth.
 
-For what it is worth, each step also scores higher here: 0.388 (v1), 0.455 (v2), 0.547 (v3), and
-macroF1 rises from 0.599 to 0.773 with the stoppage detector.
+For what it is worth, each step up to v3 also scores higher here: 0.388 (v1), 0.455 (v2), 0.547
+(v3), and macroF1 rises from 0.599 to 0.773 with the stoppage detector. v4 scores the same as v3:
+none of its changes fall inside the public window.
 
-Sanity checks on the full match (counts only, no ground truth involved): the detector behaves on
-the competition tracking as it did on the external games. The mean player speed has quartiles
-0.97 / 1.45 / 2.21 m/s, it marks 142 stoppages, and v3 calls 40.1% of the 158,857 graded frames
-dead (35.5% H, 24.4% A), against 11.3% for v2 and 39-46% in the external providers' labels. It
-predicts 313 possessions (mean 12.2 s). The build is deterministic: `make reproduce` rebuilds a
+**What the tactical phases turned out to be worth on this match** (counts only, no ground truth
+involved). Share of confirmed-control frames on which the tagged team is the team in control:
+
+| Phase code | Frames | Agreement | Used as |
+|---|---|---|---|
+| Build Up | 5,415 | 0.88 | team has the ball |
+| Defending in Attacking Third | 5,415 | 0.12 | team is without the ball |
+| Progression | 14,000 | just under 0.85 | not used |
+| Defending in Middle Third | 14,000 | just over 0.15 | not used |
+| Attacking Transition / Defensive Transition | 4,251 | 0.73 / 0.27 | not used |
+| Ball in Final Third | 21,116 | 0.70 | not used |
+| Long Ball | 2,701 | 0.66 | not used |
+| Creating Chances / Defending in Defensive Third | 5,402 | 0.63 / 0.37 | not used |
+| Ball in the Box | 9,591 | 0.63 | not used |
+| Players in the Box | 20,148 | 0.59 | not used |
+
+The codes come in mirrored pairs (one team's Build Up is the other's Defending in Attacking
+Third), which is why the shares sum to 1. Only the Build Up pair clears the gate that was fixed
+on external data; Progression misses it narrowly, and we did not move the gate after seeing
+this. The final-third and box codes are right on only 59-70% of frames: they describe where the
+ball is more than who has it. So v4 is a small, conservative change on this match: phases give
+a vote on 11,011 frames and add 27 confirmed-control starts, and the output goes from 313 to 316
+possessions.
+
+Sanity checks on the full match (counts only): the stoppage detector behaves on the competition
+tracking as it did on the external games. The mean player speed has quartiles
+0.97 / 1.45 / 2.21 m/s, it marks 142 stoppages, and v4 calls 40.1% of the 158,857 graded frames
+dead (36.0% H, 23.9% A), against 11.3% for v2 and 39-46% in the external providers' labels. It
+predicts 316 possessions (mean 12.0 s). The ball is missing on 41% of graded frames, which is
+the case the phase rule is for. The build is deterministic: `make reproduce` rebuilds a
 byte-identical file
-(SHA-256 `0a37f9ad49582c3d5bd9b3e30fe3c9ef78a1ccf62676f23bf8e08b59edd2f2d4`).
+(SHA-256 `7139412bfedeacba6b7f7ac7640387205b3e430edbadc1379c169fe623bc7b7f`).
 
 ### How the public window was used
 Only to check correctness. The first version predicted **2 possessions** on the public window.

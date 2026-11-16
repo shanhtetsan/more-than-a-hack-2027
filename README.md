@@ -20,14 +20,15 @@ literature, the Laws of the Game, or design choices fixed before any scoring. Ea
 | Organisers' `baseline_smooth50` (all 20 matches) | 0.350 |
 | v1 (literature defaults) | 0.437 |
 | v2 (three parameters set on external data) | 0.470 (better than v1 on 9 of 10) |
-| **v3 = v2 + stoppage detector, submitted** | **0.487** (better than v2 on 9 of 10) |
+| v3 = v2 + stoppage detector | **0.487** (better than v2 on 9 of 10) |
+| **v4 = v3 + Smart Tagging tactical phases, submitted** | no external dataset has these tags; on simulated tags 0.490–0.511 at 0–10% tag errors, falls back to v3 when tags are unreliable |
 
 On a held-out Metrica sample game (same provider as the competition data), v3 scores 0.467
 against 0.365 for v2.
 
 **Competition match, public 5-minute window** (17 possessions, a correctness check only, never
 used to choose anything): v1 scored spellF1 0.388 against 0.326 for the published floor
-`baseline_smooth50`; v2 scored 0.455 and v3 0.547.
+`baseline_smooth50`; v2 scored 0.455, v3 and v4 0.547.
 
 ![Mean spellF1 on 10 held-out SkillCorner matches: organisers' baseline 0.345, v1 0.437, v2 0.470, v3 0.487](docs/figures/versions.png)
 
