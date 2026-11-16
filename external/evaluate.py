@@ -51,10 +51,14 @@ def baseline_labels(m, window):
     return labels
 
 
-def score_match(mid, overrides, window=None, cache={}):  # noqa: B006  (per-process cache)
+def loaded(mid, cache={}):  # noqa: B006  (per-process cache)
     if mid not in cache:
         cache[mid] = skillcorner.load_match(mid)
-    m = cache[mid]
+    return cache[mid]
+
+
+def score_match(mid, overrides, window=None):
+    m = loaded(mid)
     if window is not None:
         labels = baseline_labels(m, window)
     else:
@@ -67,11 +71,11 @@ def score_match(mid, overrides, window=None, cache={}):  # noqa: B006  (per-proc
                                                 "gt_poss": res["n_gt_spells"]}
 
 
-def score_arrays(m, overrides):
+def score_arrays(m, overrides, phases=None):
     """Official metrics for one loaded match dict (skillcorner or metrica_sample)."""
     cfg = make_cfg(m["length"], m["width"], overrides)
     labels, _ = core.run_match(m["ball"], m["players"], m["team"], m["restarts"], m["n_frames"],
-                               m["blocks"], cfg, m["goal_restarts"])
+                               m["blocks"], cfg, m["goal_restarts"], phases)
     res = pm.evaluate(pm.label_codes(m["gt"]), pm.label_codes(labels), bootstrap_n=0)
     graded = m["gt"] != "X"
     return {"spell_f1_mean": float(res["spell_f1_mean"]), "macro_f1": float(res["macro_f1"]),

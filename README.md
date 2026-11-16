@@ -44,6 +44,7 @@ flowchart LR
     B --> C[Per-frame control<br/>≤2 m, no opponent ≤1 m]
     C --> D[Confirmed control<br/>≥12 frames]
     E[Smart Tagging<br/>set-piece restarts] --> F
+    P[Smart Tagging<br/>tactical phases] --> D
     B --> G[Ball out of play<br/>&gt;0.5 m out, ≥5 frames]
     D --> F[Possession state machine]
     G --> F
@@ -70,6 +71,7 @@ make reproduce  TEAM=DX_Lab_Team_3  # rebuild twice, check the file is byte-iden
 make external                       # external validation on 20 SkillCorner matches
 make external-sweep                 # v1 -> v2 parameter study (dev grid + held-out check)
 make external-stoppage              # v2 -> v3 stoppage-detector study
+make external-phases                # v3 -> v4 study on simulated phase tags
 make figures                        # redraw docs/figures from the external games
 make test                           # unit tests on synthetic data, no match data needed
 ```

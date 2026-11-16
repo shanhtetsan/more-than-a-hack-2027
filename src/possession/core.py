@@ -107,6 +107,90 @@ def confirmed_starts(control, min_frames):
     return out
 
 
+# --- (4b) Smart Tagging phases as possession evidence ----------------------------------------
+
+def phase_events(events, team_to_side, skip_codes):
+    """[(code, first, end, side)] for every tagged phase that names a team.
+
+    `events` as from starter/load_smart_tagging.py (end_frame exclusive). Codes in `skip_codes`
+    (set pieces, goals) and phases whose Team tag maps to no side ("N/A") are dropped.
+    """
+    team_to_side = {k.strip().lower(): v for k, v in team_to_side.items()}
+    skip = {c.strip().lower() for c in skip_codes}
+    out = []
+    for event in events:
+        code = (event.get("code") or "").strip().lower()
+        tag = ((event.get("tags") or {}).get("Team") or "").strip().lower()
+        side = SIDE_CODE.get(team_to_side.get(tag), NONE)
+        if code and code not in skip and side != NONE:
+            out.append((code, int(event["start_frame"]), int(event["end_frame"]), side))
+    return out
+
+
+def confirmed_frames(control, min_frames):
+    """`control` kept only inside confirmed runs (same team >= min_frames), NONE elsewhere."""
+    out = np.full(len(control), NONE, dtype=np.int8)
+    starts, lengths, values = run_lengths(control)
+    for start, length, value in zip(starts, lengths, values, strict=True):
+        if value != NONE and length >= min_frames:
+            out[start:start + length] = value
+    return out
+
+
+def phase_polarity(phases, anchors, min_agreement, min_frames):
+    """What each phase code says about possession, learned from the pipeline's own evidence.
+
+    `anchors` holds the controlling team on frames of confirmed, ball-in-view control and NONE
+    elsewhere. For each code we count the anchor frames inside its phases and how many agree with
+    the phase's team. Returns ({code: +1 | -1 | 0}, {code: (agree, total)}):
+      +1  the tagged team is the one in possession (agreement >= min_agreement),
+      -1  the tagged team is the one WITHOUT the ball (agreement <= 1 - min_agreement),
+       0  not used: too few anchor frames (< min_frames) or no clear meaning.
+    No ground truth is involved: the labels are the algorithm's own confirmed-control frames.
+    """
+    n = len(anchors)
+    counts = {}
+    for code, first, end, side in phases:
+        window = anchors[max(first, 0):min(end, n)]
+        agree, total = counts.get(code, (0, 0))
+        counts[code] = (agree + int(np.sum(window == side)), total + int(np.sum(window != NONE)))
+    polarity = {}
+    for code, (agree, total) in counts.items():
+        share = agree / total if total else 0.5
+        if total < min_frames:
+            polarity[code] = 0
+        elif share >= min_agreement:
+            polarity[code] = 1
+        elif share <= 1 - min_agreement:
+            polarity[code] = -1
+        else:
+            polarity[code] = 0
+    return polarity, counts
+
+
+def phase_vote(phases, polarity, n_frames):
+    """Per frame: the team the usable phases say has the ball (HOME/AWAY), NONE on no vote or a
+    tie. Each covering phase votes for its team (polarity +1) or the other team (polarity -1)."""
+    score = np.zeros(n_frames + 1, dtype=np.int32)
+    for code, first, end, side in phases:
+        sign = polarity.get(code, 0) * (1 if side == HOME else -1)
+        if sign:
+            score[max(first, 0)] += sign
+            score[min(max(end, 0), n_frames)] -= sign
+    score = np.cumsum(score[:-1])
+    out = np.full(n_frames, NONE, dtype=np.int8)
+    out[score > 0] = HOME
+    out[score < 0] = AWAY
+    return out
+
+
+def phase_confirmed_starts(control, vote, min_frames):
+    """Confirmed starts from phase evidence alone: runs of at least `min_frames` where the
+    geometry shows no team in control (ball missing, loose or in flight) and the phases keep
+    naming the same team. Geometry always wins on a frame where it has an answer."""
+    return confirmed_starts(np.where(control == NONE, vote, NONE).astype(np.int8), min_frames)
+
+
 # --- (5) dead ball --------------------------------------------------------------------------
 
 def ball_out(ball, length, width, margin=0.0):
@@ -433,13 +517,14 @@ def label_match(ball, players, team, restarts, n_frames, blocks, cfg,
     return run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restarts)[0]
 
 
-def run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restarts=None):
+def run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restarts=None,
+              phases=None):
     """Everything from metres-coordinates to (one letter per frame, stats).
 
     ball (n, 2) and players (n, P, 2) in metres with NaN gaps; team (P,); restarts as returned
     by restart_events, and goal_restarts the subset that can end a possible goal
     (restart_events with types=cfg.POSSIBLE_GOAL_END_TYPES); blocks [(half, first, last)] of
-    graded frames; cfg the config.
+    graded frames; cfg the config; phases, optional, as returned by phase_events.
     Frames outside every block are X. stats is new_stats() filled in, plus "ball",
     "confirmed_runs" and "final" counts (see match_counts).
     """
@@ -447,6 +532,17 @@ def run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restart
     ball = interpolate_ball(ball, cfg.MAX_BALL_GAP_FRAMES)
     control = frame_control(ball, players, team, cfg.CONTROL_RADIUS_M, cfg.DUEL_RADIUS_M)
     confirmed = confirmed_starts(control, cfg.MIN_CONFIRMED_FRAMES)
+    phase_stats = None
+    if phases and cfg.PHASE_MIN_FRAMES:
+        anchors = confirmed_frames(control, cfg.MIN_CONFIRMED_FRAMES)
+        polarity, counts = phase_polarity(phases, anchors, cfg.PHASE_MIN_AGREEMENT,
+                                          cfg.PHASE_MIN_ANCHOR_FRAMES)
+        vote = phase_vote(phases, polarity, n_frames)
+        extra = phase_confirmed_starts(control, vote, cfg.PHASE_MIN_FRAMES)
+        phase_stats = {"codes": {c: (*counts[c], polarity[c]) for c in sorted(counts)},
+                       "vote frames": int(np.sum(vote != NONE)),
+                       "runs": int(np.sum((extra != NONE) & (confirmed == NONE)))}
+        confirmed = np.where(confirmed != NONE, confirmed, extra).astype(np.int8)
     out = ball_out(ball, cfg.PITCH_LENGTH_M, cfg.PITCH_WIDTH_M, cfg.OUT_MARGIN_M)
     out_start = sustained_out_starts(out, cfg.MIN_OUT_FRAMES)
     # "back inside" means within the lines themselves, with no noise margin
@@ -470,6 +566,8 @@ def run_match(ball, players, team, restarts, n_frames, blocks, cfg, goal_restart
         "speed quartiles": [round(float(q), 2) for q in np.percentile(known, [25, 50, 75])]
         if len(known) else [],
     }
+    if phase_stats is not None:
+        stats["phases"] = phase_stats
     codes = np.full(n_frames, NOX, dtype=np.int8)
     for _, first, last in blocks:
         states = assign_states(confirmed, out_start, inside, restarts, first, last,

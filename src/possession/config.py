@@ -26,7 +26,8 @@ spellF1 0.437 (v1) -> 0.470 (v2), better on 9 of 10, paired bootstrap 95% CI of 
 [+0.020, +0.046]. The competition data, its ground truth and its video played no part.
 Reproduce: `make external` (v2) and docs/TECHNICAL.md section 5.
 
-v3 adds a stoppage detector (section 5b at the end of this file), also set on external data only.
+v3 adds a stoppage detector (section 5b below), also set on external data only.
+v4 adds Smart Tagging phases as possession evidence (section 4b at the end of this file).
 """
 
 import os
@@ -190,3 +191,42 @@ STOPPAGE_MIN_PLAYERS = 6
 # build-up, not a dead ball. 2-3 m/s scored alike on the development data. An unseen ball vetoes
 # nothing, so the detector still works through ball gaps.
 STOPPAGE_BALL_MPS = 3.0
+
+
+# --- (4b) Smart Tagging phases as possession evidence (v4) ---------------------------------
+# v3 used only the 59 set-piece tags. The other ~580 Smart Tagging instances are tactical phases
+# (Build Up, Progression, Defending in Middle Third, ...), each tagged with a team. DATA.md calls
+# them "a strong prior, for free" and warns that they are automatic, are phases rather than
+# possessions, and can be wrong. v4 uses them only where the geometry has no answer: when no team
+# shows control (ball missing, loose or in flight) for a sustained run and the phases keep naming
+# one team, that run counts as that team's confirmed control. A frame where the geometry does
+# show control is never overridden.
+#
+# Which codes name the team WITH the ball and which the team WITHOUT it is not assumed. It is
+# learned on the match itself from the pipeline's own confirmed, ball-in-view control frames
+# (algorithmic pseudo-labels, no ground truth, no human decision -- RULES.md "learning without
+# human labels"). A code whose meaning is unclear is not used, so tags that turn out unreliable
+# switch the feature off and the output is v3.
+#
+# No external dataset ships Smart Tagging, so the values below were set on SIMULATED tags cut
+# from external games' own labels and degraded (60% coverage, about 1 s jitter, half the phases
+# naming the defending team, 0-40% naming the wrong team): external/phase_study.py,
+# `make external-phases`. Held-out result against v3: better while at most about 20% of tags are
+# wrong (SkillCorner 0.487 -> 0.511 / 0.490 / 0.488 at 0 / 10 / 20% wrong; Metrica game 2 with
+# the ball hidden on 40% of frames 0.377 -> 0.460 / 0.451 / 0.399), identical to v3 beyond that
+# because the agreement gate rejects the codes.
+
+# Codes that are not phases of open play.
+PHASE_SKIP_CODES = ("SET PIECES", "GOALS")
+
+# A phase-only run must last this long (2 s) to count as confirmed control. The tags are accurate
+# to about a second; 50 was the best of 50 / 75 / 125 on the development games.
+PHASE_MIN_FRAMES = 50
+
+# A code is used only if the tagged team matches our confirmed-control team on at least this
+# share of anchor frames (it names the team with the ball) or at most 1 - this share (it names
+# the team without it), with at least PHASE_MIN_ANCHOR_FRAMES anchor frames (20 s) to judge by.
+# 0.85 rather than 0.80: at 0.80 a tag set with 20% errors was still let through and cost a
+# little on the development games.
+PHASE_MIN_AGREEMENT = 0.85
+PHASE_MIN_ANCHOR_FRAMES = 500

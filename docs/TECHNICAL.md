@@ -21,7 +21,11 @@ machine, instead of smoothing a per-frame guess:
   taken from Smart Tagging, or until play has visibly resumed;
 - the ball is also **dead while play is stopped**: when the players are collectively slow for
   several seconds, with no ball seen moving among them. This catches fouls, injuries and the wait
-  before a restart, and it needs neither the ball nor player identities.
+  before a restart, and it needs neither the ball nor player identities;
+- where the tracking cannot say who has the ball for two seconds or more, the **Smart Tagging
+  tactical phases** can: a team tagged as building up or progressing has the ball. Which phase
+  codes can be trusted, and what each one means, is checked on the match itself against the
+  frames where the tracking is sure (section 3.6).
 
 We chose a rule-based system over a learned model on purpose:
 
@@ -37,7 +41,7 @@ We chose a rule-based system over a learned model on purpose:
 | Asset | Used? | How / why not |
 |---|---|---|
 | Tactical ATD (tracking) | **Yes** | Ball and player positions per frame, team membership per track slot. Read with kloppy's EPTS metadata parser and streaming reader, scaled to metres with the `games.py` pitch (105.3 × 68.0 m). |
-| Smart Tagging | **Yes, set pieces only** | The `SET PIECES` code gives restarts (kickoffs, throw-ins, corners, goal kicks, free kicks) and, for most types, the team taking them. They end dead-ball periods. |
+| Smart Tagging | **Yes, set pieces and tactical phases** | The `SET PIECES` code gives restarts (kickoffs, throw-ins, corners, goal kicks, free kicks) and, for most types, the team taking them. They end dead-ball periods. The team-tagged tactical phases (Build Up, Progression, Defending in Middle Third, ...) are used as possession evidence where the tracking shows no team in control (section 3.6). `GOALS` is not used. |
 | `games.py` | Yes | Pitch size, frame counts and the graded half boundaries. |
 | Homography | No | The ATD already gives pitch coordinates, so the camera model adds nothing for a position-based method. |
 | Tactical video | No | Not needed for a position-based method. The rules also forbid checking output against it. |
@@ -65,6 +69,7 @@ flowchart LR
     B --> C[2. Per-frame control<br/>≤2 m, no opponent ≤1 m]
     C --> D[3. Confirmed control<br/>≥12 frames]
     E[Smart Tagging<br/>set-piece restarts] --> F
+    P[Smart Tagging<br/>tactical phases] --> D
     B --> G[4. Ball out of play<br/>&gt;0.5 m out, ≥5 frames]
     D --> F[5. State machine]
     G --> F
@@ -127,7 +132,32 @@ The state machine keeps running underneath. When play resumes, possession is wha
 the previous team, unless the other team took confirmed control during the stoppage (for example
 picking the ball up for a free kick).
 
-### 3.6 The state machine
+### 3.6 Tactical phases as possession evidence
+Rules 3.2–3.3 are silent whenever no team shows control: the ball is missing from the tracking,
+loose, or in flight. Until v3 the state simply held through those frames, so a change of
+possession inside a long ball gap was found late or not at all (the main limitation of v3).
+
+Smart Tagging tags about 580 tactical phases with a team. `DATA.md` calls them a strong prior and
+warns that they are automatic, are phases rather than possessions, and can be wrong. We use them
+under three safeguards:
+
+1. **The meaning of each code is measured, not assumed.** Some codes name the team with the ball
+   (attacking phases), some the team without it (defending phases). For every code we count, over
+   the frames where the tracking shows confirmed control, how often the tagged team is the team
+   in control. A code is used as "has the ball" if that share is **at least 0.85**, as "does not
+   have the ball" if it is **at most 0.15**, and **not used at all** otherwise, or if it has
+   fewer than 500 such frames (20 s) to judge by. The reference here is the pipeline's own
+   output on frames with the ball in view: algorithmic pseudo-labels from the provided game,
+   with no ground truth and no human decision (RULES.md, "learning without human labels").
+2. **Phases never override the tracking.** They count only on frames where no team shows control.
+3. **They must persist.** The usable phases must name the same team for **at least 50 frames
+   (2 s)** of such frames; that run then counts as that team's confirmed control and enters the
+   state machine like any other. Where two usable phases disagree, there is no vote.
+
+If the tags are unreliable on this match, safeguard 1 rejects the codes and the output is
+exactly v3. Dead-ball rules are unchanged and still take priority.
+
+### 3.7 The state machine
 While the ball is live, possession changes **only** when the *other* team gets confirmed control.
 Frames with no control, contested frames and frames without a ball keep the current team.
 
@@ -136,19 +166,19 @@ stateDiagram-v2
     [*] --> Dead: half starts
     Dead --> Home: restart tag (Barça) / confirmed control
     Dead --> Away: restart tag (Athletic) / confirmed control
-    Home --> Away: Athletic confirmed control
-    Away --> Home: Barça confirmed control
+    Home --> Away: Athletic confirmed control (tracking or phases)
+    Away --> Home: Barça confirmed control (tracking or phases)
     Home --> Dead: ball out of play
     Away --> Dead: ball out of play
 ```
 
-### 3.7 Short runs and ungraded time
+### 3.8 Short runs and ungraded time
 - Possession runs and dead-ball runs shorter than **2 s (50 frames)** are merged into the run
   before them. A flicker should not count as a possession.
 - Frames outside the two graded halves (before kickoff, half-time, after the final whistle) are
   `X`.
 
-### 3.8 Where we drew the lines
+### 3.9 Where we drew the lines
 
 | Situation | Our rule |
 |---|---|
@@ -180,6 +210,8 @@ with its source.
 | Stoppage: smoothing window and minimum length | 75 frames (3 s) each | **External data** (3 s against 5 s minimum; window fixed) |
 | Stoppage: ball veto | seen ball at 3 m/s or more | **External data.** 2 and 3 m/s scored alike |
 | Stoppage: speed span, swap cut-off, minimum slots | 1 s, 12 m/s, 6 slots | Design choice (jitter and track swaps) |
+| Phases: minimum run | 50 frames (2 s) | **External data, simulated tags** (section 5). Best of 2 / 3 / 5 s |
+| Phases: agreement to trust a code | 0.85 (or ≤ 0.15), on ≥ 500 frames | **External data, simulated tags.** 0.80 let a tag set with 20% errors through |
 | Out-of-pitch margin and run | 0.5 m, 5 frames | Design choice, to reject tracking noise near the lines |
 | Goal-mouth margin | 0.5 m | Design choice, same as the out margin |
 | Minimum dead-ball run | 50 frames (2 s) | Design choice |
@@ -251,7 +283,24 @@ Caveat: SkillCorner is broadcast tracking from a different league and provider, 
 possession definition, so absolute numbers do not transfer to the competition match. What
 transfers is the direction: these settings generalise across 20 matches rather than fitting one.
 
-Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v3) and `make external` for the 20-match scores
+**Tactical phases (v3 → v4).** No public dataset ships Smart Tagging, so this step could not be
+tested on real tags with labels. We tested the **mechanism** instead, on simulated tags: phases
+cut from each external game's own possession labels and then degraded to resemble automatic
+tags (only 60% of possessions covered, start and end jittered by about 1 s, half of the phases
+naming the defending team under a different code, and 0–40% of phases naming the wrong team).
+The run length and the agreement gate were set on the development games; held-out results:
+
+| Held-out, mean spellF1 | v3 | v4, 0% wrong | 10% | 20% | 30–40% |
+|---|---|---|---|---|---|
+| SkillCorner, 10 matches | 0.487 | 0.511 | 0.490 | 0.488 | 0.487 (codes rejected) |
+| Metrica game 2, ball hidden on 40% of frames | 0.377 | 0.460 | 0.451 | 0.399 | 0.377 (codes rejected) |
+
+What this shows: the gain is real when the tags are mostly right, largest when the ball is often
+missing, and the agreement gate turns the rule off before bad tags can hurt. What it does **not**
+show is how accurate the real tags are. That is measured on the competition match itself by the
+agreement shares in section 5 (no ground truth involved).
+
+Reproduce: `make external-sweep` (v1 → v2), `make external-stoppage` (v2 → v3), `make external-phases` (v3 → v4) and `make external` for the 20-match scores
 (both download the pinned SkillCorner revision to `external_data/`).
 
 ### Competition match, public 5-minute window (correctness check only)
@@ -299,9 +348,12 @@ is a bug fix, not a parameter change, and no parameter value changed as a result
   longer context, trained on other games, as in published work on game-interruption detection.
 - **The speed threshold was set on cleaner tracking.** If automatic tracking jitter inflates
   speeds, the detector fires less often, which falls back towards v2 rather than breaking.
-- **Long ball gaps.** When the ball is missing for more than 1 s, the state holds, so a change of
-  possession inside the gap is found late or missed. Next step: infer the ball's likely side from
-  team shape and movement, or estimate the ball's position with a Kalman smoother.
+- **Long ball gaps.** When the ball is missing for more than 1 s and no trusted phase covers the
+  gap, the state holds, so a change of possession inside it is found late or missed. Next step:
+  infer the ball's likely side from team shape and movement.
+- **The phase rule was validated on simulated tags only**, because no external dataset has
+  Smart Tagging. Its safety rests on the agreement gate, which is measured on confirmed-control
+  frames; tags could be less accurate exactly where the ball is missing.
 - **No ball height.** Shots over the bar and goals look the same. We resolve it through the
   restart that follows; the event tags could resolve it directly.
 - **Short possessions** under 2 s are merged into the run before them, so a very brief possession
@@ -322,6 +374,7 @@ make reproduce  TEAM=DX_Lab_Team_3  # builds twice and checks the files are byte
 make external                       # external validation on SkillCorner open data
 make external-sweep                 # v1 -> v2 study: 24-setting grid on 10 matches, held-out check on 10
 make external-stoppage              # v2 -> v3 study: stoppage detector, SkillCorner + Metrica sample games
+make external-phases                # v3 -> v4 study: simulated phase tags of varying quality
 make test                           # unit tests on synthetic data only
 ```
 
@@ -333,7 +386,8 @@ ground truth and `games.py` are unmodified. The match data is not in this reposi
 - Labels come from the algorithm only. There is no hand annotation and no manual data.
 - Nothing was trained, fitted or calibrated on the ground truth or the video. Parameters were
   chosen on external data about other games (SkillCorner and Metrica sample data), as the rules
-  allow. The public ground
+  allow. The meaning of each Smart Tagging phase code is learned on the provided game from the
+  algorithm's own output, without labels (section 3.6). The public ground
   truth was used for correctness checks only (section 5).
 - We did not check our output against the video.
 

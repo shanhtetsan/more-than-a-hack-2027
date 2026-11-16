@@ -704,6 +704,72 @@ def test_run_match_marks_a_stoppage_dead_and_resumes_with_the_holder():
     assert stats["stoppage"]["runs"] == 1
 
 
+# --- (4b) Smart Tagging phases --------------------------------------------------------------
+
+def phase(code, first, end, team):
+    return {"code": code, "start_frame": first, "end_frame": end, "tags": {"Team": team}}
+
+
+def test_phase_events_keeps_team_tagged_open_play_phases_only():
+    events = [phase("BUILD UP", 10, 60, "Barcelona"), phase("Set Pieces", 0, 5, "Barcelona"),
+              phase("PROGRESSION", 70, 90, "N/A"), phase("GOALS", 5, 9, "Atletic Club"),
+              phase("Defending in Middle Third", 100, 180, "atletic club")]
+    out = core.phase_events(events, config.TEAM_TAG_TO_SIDE, config.PHASE_SKIP_CODES)
+    assert out == [("build up", 10, 60, HOME), ("defending in middle third", 100, 180, AWAY)]
+
+
+def test_phase_polarity_learns_attack_and_defence_codes_and_drops_unclear_ones():
+    anchors = np.full(4000, NONE, dtype=np.int8)
+    anchors[0:1000] = HOME
+    anchors[1000:2000] = AWAY
+    anchors[2000:3000] = HOME
+    phases = [("attack", 0, 1000, HOME), ("attack", 1000, 2000, AWAY),
+              ("defend", 0, 1000, AWAY), ("defend", 1000, 2000, HOME),
+              ("mixed", 0, 2000, HOME),            # right half the time
+              ("rare", 2000, 2100, HOME)]          # too few anchor frames
+    polarity, counts = core.phase_polarity(phases, anchors, 0.85, 500)
+    assert polarity == {"attack": 1, "defend": -1, "mixed": 0, "rare": 0}
+    assert counts["attack"] == (2000, 2000) and counts["defend"] == (0, 2000)
+
+
+def test_phase_vote_sums_signed_votes_and_ties_give_none():
+    phases = [("attack", 0, 10, HOME), ("defend", 5, 15, HOME), ("attack", 20, 30, AWAY),
+              ("unused", 30, 40, HOME)]
+    vote = core.phase_vote(phases, {"attack": 1, "defend": -1, "unused": 0}, 40)
+    assert (vote[0:5] == HOME).all() and (vote[5:10] == NONE).all()     # +1 and -1 cancel
+    assert (vote[10:15] == AWAY).all() and (vote[15:20] == NONE).all()  # home defending
+    assert (vote[20:30] == AWAY).all() and (vote[30:] == NONE).all()
+
+
+def test_phase_evidence_only_where_geometry_is_silent_and_only_if_long_enough():
+    control = np.full(300, NONE, dtype=np.int8)
+    control[100:110] = HOME                       # geometry speaks here
+    vote = np.full(300, NONE, dtype=np.int8)
+    vote[20:60] = AWAY                            # 40 frames: too short
+    vote[90:200] = AWAY                           # split by the geometry at 100..109
+    starts = core.phase_confirmed_starts(control, vote, 50)
+    assert np.flatnonzero(starts != NONE).tolist() == [110] and starts[110] == AWAY
+
+
+def test_run_match_phases_move_possession_through_a_ball_gap_and_can_be_switched_off():
+    n = 1200
+    speeds = np.full(n, 3.0)
+    players = movers(n, speeds)
+    team = np.array([HOME] * 4 + [AWAY] * 4, dtype=np.int8)
+    players[:, 4:, 1] = 60.0                             # away players 30 m from the home ones
+    ball = np.full((n, 2), np.nan)
+    ball[:400] = players[:400, 0, :].astype(float) + (0.3, 0.0)   # home carries, ball in view
+    ball[900:] = players[900:, 4, :].astype(float) + (0.3, 0.0)   # away carries, ball in view
+    phases = [("attack", 0, 400, HOME), ("attack", 500, 1200, AWAY)]
+    cfg = stop_cfg(PITCH_LENGTH_M=10_000.0, PITCH_WIDTH_M=10_000.0, PHASE_MIN_ANCHOR_FRAMES=100)
+    args = (ball, players, team, {0: HOME}, n, [(1, 0, n - 1)])
+    with_phases = "".join(core.run_match(*args, cfg, None, phases)[0])
+    assert set(with_phases[:450]) == {"H"} and set(with_phases[520:]) == {"A"}
+    cfg.PHASE_MIN_FRAMES = 0
+    without = "".join(core.run_match(*args, cfg, None, phases)[0])
+    assert set(without[:880]) == {"H"} and set(without[920:]) == {"A"}
+
+
 # --- external harness ------------------------------------------------------------------------
 
 def test_external_resample_10_to_25_fps_is_linear_and_spreads_nan():

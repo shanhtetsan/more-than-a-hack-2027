@@ -53,6 +53,16 @@ def summary_lines(stats, types, blocks):
     lines.append(f"  {'total':<24} {total['parsed']:>4} {total['in graded']:>4} "
                  f"{total['ended a D']:>4}")
 
+    phases = stats.get("phases")
+    if phases is not None:
+        lines.append("Smart Tagging phases, checked against our own confirmed-control frames:")
+        lines.append("  code: anchor frames / agree with tagged team -> use "
+                     "(+1 team has the ball, -1 team is without it, 0 unused)")
+        for code, (agree, total, use) in phases["codes"].items():
+            share = f"{agree / total:.2f}" if total else "n/a"
+            lines.append(f"  {code:<30} {total:>6} {share:>5} -> {use:+d}")
+        lines.append(f"  frames with a phase vote: {phases['vote frames']}; confirmed starts "
+                     f"added by phases: {phases['runs']}")
     stop = stats.get("stoppage")
     if stop is not None:
         lines.append(f"stoppages from collective speed: {stop['runs']} runs, {stop['frames']} "

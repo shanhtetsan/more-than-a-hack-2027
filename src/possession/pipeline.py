@@ -1,11 +1,15 @@
 """Build the submission file: data in, frame,label CSV out.
 
-Rule-based pipeline, v3 (every number is in config.py, every rule in core.py):
+Rule-based pipeline, v4 (every number is in config.py, every rule in core.py):
   1. tactical ATD via kloppy, scaled to metres with the games.py pitch
   2. ball gaps of <= 25 frames linearly interpolated
   3. per-frame control: nearest player <= 2.0 m from the ball, no opponent <= 1.0 m
   4. confirmed control = same team >= 12 consecutive frames; possession switches only on the
      other team's confirmed control, otherwise the last state holds
+  4b. where the geometry shows nobody in control (ball missing, loose or in flight) for
+     >= 50 frames and the Smart Tagging phases keep naming one team, that also counts as that
+     team's confirmed control. Which phase codes name the team with the ball is learned from
+     the pipeline's own confirmed-control frames (no ground truth); unclear codes are unused
   5. ball > 0.5 m outside the pitch for >= 5 frames -> D, until the next Smart Tagging
      set-piece restart (possession to the tagged team) or, if sooner, the ball back inside
      with a team's confirmed control (possession to that team). A possible goal (exit over a
@@ -49,8 +53,10 @@ def predict():
                                         types=config.POSSIBLE_GOAL_END_TYPES, blocks=blocks)
     print(f"  {len(team)} track slots, {len(restarts)} set-piece restarts "
           f"({len(goal_restarts)} kickoff/goal-kick/corner)")
+    phases = core.phase_events(events, config.TEAM_TAG_TO_SIDE, config.PHASE_SKIP_CODES)
+    print(f"  {len(phases)} team-tagged Smart Tagging phases")
     labels, stats = core.run_match(ball, players, team, restarts, config.N_FRAMES,
-                                   config.GRADED_BLOCKS, config, goal_restarts)
+                                   config.GRADED_BLOCKS, config, goal_restarts, phases)
     types = core.restart_types(events, config.RESTART_CODE, config.RESTART_ANCHOR, blocks)
     return labels, diagnostics.summary_lines(stats, types, config.GRADED_BLOCKS)
 
